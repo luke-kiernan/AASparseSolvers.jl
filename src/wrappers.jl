@@ -2,7 +2,6 @@
 # Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/
 # vecLib.framework/Versions/A/Headers/Sparse/Solve.h
 
-module AASparseSolvers
 @enum SparseTriangle_t::UInt8 begin
     SparseLowerTriangle = 0
     SparseUpperTriangle = 1
@@ -142,126 +141,112 @@ LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Framewor
 
 
 for T in (Cfloat, Cdouble)
-    # simpler way that doesn't require quoting a symbol?
+    # simpler way that doesn't require @eval?
     # also, if I could write "dense vector-or-matrix," that'd cut the redundancy in half.
-    local dmMultMangled = T == Cfloat ? :(:_Z14SparseMultiply18SparseMatrix_Float17DenseMatrix_FloatS0_) :
-                        :(:_Z14SparseMultiply19SparseMatrix_Double18DenseMatrix_DoubleS0_)
+    local dmMultMangled = T == Cfloat ? :_Z14SparseMultiply18SparseMatrix_Float17DenseMatrix_FloatS0_ :
+                        :_Z14SparseMultiply19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
         function SparseMultiply(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T}, arg3::DenseMatrix{$T})
-            ccall(($dmMultMangled, LIBSPARSE), Nothing,
-                    (SparseMatrix{$T}, DenseMatrix{$T}, DenseMatrix{$T}),
-                    arg1, arg2, arg3)
+            @ccall LIBSPARSE.$dmMultMangled(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
+                                                arg3::DenseMatrix{$T})::Cvoid
         end
     end
-    local dvMultMangled = T == Cfloat ? :(:_Z14SparseMultiply18SparseMatrix_Float17DenseVector_FloatS0_) :
-                        :(:_Z14SparseMultiply19SparseMatrix_Double18DenseVector_DoubleS0_)
+    local dvMultMangled = T == Cfloat ? :_Z14SparseMultiply18SparseMatrix_Float17DenseVector_FloatS0_ :
+                        :_Z14SparseMultiply19SparseMatrix_Double18DenseVector_DoubleS0_
     @eval begin
         function SparseMultiply(arg1::SparseMatrix{$T}, arg2::DenseVector{$T}, arg3::DenseVector{$T})
-            ccall(($dvMultMangled, LIBSPARSE), Nothing,
-                    (SparseMatrix{$T}, DenseVector{$T}, DenseVector{$T}),
-                    arg1, arg2, arg3)
+            @ccall LIBSPARSE.$dvMultMangled(arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
+                                            arg3::DenseVector{$T})::Cvoid
         end
     end
 
-    local sdmMultMangled = T == Cfloat ? :(:_Z14SparseMultiplyf18SparseMatrix_Float17DenseMatrix_FloatS0_) :
-                                :(:_Z14SparseMultiplyd19SparseMatrix_Double18DenseMatrix_DoubleS0_)
+    local sdmMultMangled = T == Cfloat ? :_Z14SparseMultiplyf18SparseMatrix_Float17DenseMatrix_FloatS0_ :
+                                :_Z14SparseMultiplyd19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
         function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::DenseMatrix{$T}, arg4::DenseMatrix{$T})
-            ccall(($sdmMultMangled, LIBSPARSE), Nothing,
-                    ($T, SparseMatrix{$T}, DenseMatrix{$T}, DenseMatrix{$T}),
-                    arg1, arg2, arg3, arg4)
+            @ccall LIBSPARSE.$sdmMultMangled(arg1::$T, arg2::SparseMatrix{$T},
+                                                arg3::DenseMatrix{$T}, arg4::DenseMatrix{$T})::Cvoid
         end
     end
 
-    local sdvMultMangled = T == Cfloat ? :(:_Z14SparseMultiplyf18SparseMatrix_Float17DenseMatrix_FloatS0_) :
-                                        :(:_Z14SparseMultiplyd19SparseMatrix_Double18DenseVector_DoubleS0_)
+    local sdvMultMangled = T == Cfloat ? :_Z14SparseMultiplyf18SparseMatrix_Float17DenseMatrix_FloatS0_ :
+                                        :_Z14SparseMultiplyd19SparseMatrix_Double18DenseVector_DoubleS0_
     @eval begin
         function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::DenseVector{$T}, arg4::DenseVector{$T})
-            ccall(($sdvMultMangled, LIBSPARSE), Nothing,
-                    ($T, SparseMatrix{$T}, DenseVector{$T}, DenseVector{$T}),
-                    arg1, arg2, arg3, arg4)
+            @ccall LIBSPARSE.$sdvMultMangled(arg1::$T, arg2::SparseMatrix{$T},
+                                                arg3::DenseVector{$T}, arg4::DenseVector{$T})::Cvoid
         end
     end
 
-    local dmMultAddMangled = T == Cfloat ? :(:_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseMatrix_FloatS0_) :
-                                            :(:_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseMatrix_DoubleS0_)
+    local dmMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseMatrix_FloatS0_ :
+                                            :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
         function SparseMultiplyAdd(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T}, arg3::DenseMatrix{$T})
-            ccall(($dmMultAddMangled, LIBSPARSE), Nothing,
-                    (SparseMatrix{$T}, DenseMatrix{$T}, DenseMatrix{$T}),
-                    arg1, arg2, arg3)
+            @ccall LIBSPARSE.$dmMultAddMangled(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
+                                                arg3::DenseMatrix{$T})::Cvoid
         end
     end
 
-    local dvMultAddMangled = T == Cfloat ? :(:_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseVector_FloatS0_) :
-                                            :(:_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseVector_DoubleS0_)
+    local dvMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseVector_FloatS0_ :
+                                            :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseVector_DoubleS0_
     @eval begin
         function SparseMultiplyAdd(arg1::SparseMatrix{$T}, arg2::DenseVector{$T}, arg3::DenseVector{$T})
-            ccall(($dvMultAddMangled, LIBSPARSE), Nothing,
-                    (SparseMatrix{$T}, DenseVector{$T}, DenseVector{$T}),
-                    arg1, arg2, arg3)
+            @ccall LIBSPARSE.$dvMultAddMangled(arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
+                                                arg3::DenseVector{$T})::Cvoid
         end
     end
 
-    local sdmMultAddMangled = T == Cfloat ? :(:_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseMatrix_FloatS0_) :
-                                        :(:_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseMatrix_DoubleS0_)
+    local sdmMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseMatrix_FloatS0_ :
+                                        :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
         function SparseMultiplyAdd(arg0::$T, arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T}, arg3::DenseMatrix{$T})
-            ccall(($sdmMultAddMangled, LIBSPARSE), Nothing,
-                    ($T, SparseMatrix{$T}, DenseMatrix{$T}, DenseMatrix{$T}),
-                    arg0, arg1, arg2, arg3)
+            @ccall LIBSPARSE.$sdmMultAddMangled(arg0::$T, arg1::SparseMatrix{$T},
+                                                arg2::DenseMatrix{$T}, arg3::DenseMatrix{$T})::Cvoid
         end
     end
 
-    local sdvMultAddMangled = T == Cfloat ? :(:_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseVector_FloatS0_) :
-                                        :(:_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseVector_DoubleS0_)
+    local sdvMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseVector_FloatS0_ :
+                                        :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseVector_DoubleS0_
     @eval begin
         function SparseMultiplyAdd(arg0::$T, arg1::SparseMatrix{$T}, arg2::DenseVector{$T}, arg3::DenseVector{$T})
-            ccall(($sdvMultAddMangled, LIBSPARSE), Nothing,
-                    ($T, SparseMatrix{$T}, DenseVector{$T}, DenseVector{$T}),
-                    arg0, arg1, arg2, arg3)
+            @ccall LIBSPARSE.$sdvMultAddMangled(arg0::$T, arg1::SparseMatrix{$T},
+                                                arg2::DenseVector{$T}, arg3::DenseVector{$T})::Cvoid
         end
     end
 
-    local mTransposeMangled = T == Cfloat ? :(:_Z18SparseGetTranspose18SparseMatrix_Float) :
-                                            :(:_Z18SparseGetTranspose19SparseMatrix_Double)
+    local mTransposeMangled = T == Cfloat ? :_Z18SparseGetTranspose18SparseMatrix_Float :
+                                            :_Z18SparseGetTranspose19SparseMatrix_Double
     @eval begin
         function SparseGetTranspose(arg1::SparseMatrix{$T})
-            ccall(($mTransposeMangled, LIBSPARSE), SparseMatrix{$T},
-                    (SparseMatrix{$T},), arg1)
+            @ccall LIBSPARSE.$mTransposeMangled(arg1::SparseMatrix{$T})::SparseMatrix{$T}
         end
     end
     # skipped: 2 subfactor transposes.
-    local ofTransposeMangled = T == Cfloat ? :(:_Z18SparseGetTranspose31SparseOpaqueFactorization_Float) :
-                                        :(:_Z18SparseGetTranspose32SparseOpaqueFactorization_Double)
+    local ofTransposeMangled = T == Cfloat ? :_Z18SparseGetTranspose31SparseOpaqueFactorization_Float :
+                                        :_Z18SparseGetTranspose32SparseOpaqueFactorization_Double
     @eval begin
         function SparseGetTranpose(arg1::SparseOpaqueFactorization{$T})
-            ccall(($ofTransposeMangled, LIBSPARSE), SparseOpaqueFactorization{$T},
-                    (SparseOpaqueFactorization{$T},), arg1)
+            @ccall LIBSPARSE.$ofTransposeMangled(arg1::SparseOpaqueFactorization{$T})::SparseOpaqueFactorization{$T}
         end
     end
 
-    local convertCoordMangled = T == Cfloat ? :(:_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKf) :
-                                            :(:_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKd)
+    local convertCoordMangled = T == Cfloat ? :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKf :
+                                            :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKd
     @eval begin
         function SparseConvertFromCoord(arg1::Cint, arg2::Cint, arg3::Clong, arg4::Cuchar, arg5::$att_type,
                                         arg6::Ptr{Cint}, arg7::Ptr{Cint}, arg8::Ptr{$T})
-            ccall(($convertCoordMangled, LIBSPARSE), SparseMatrix{$T},
-                    (Cint, Cint, Clong, Cuchar, $att_type, Ptr{Cint}, Ptr{Cint}, Ptr{$T}),
-                    arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
+            @ccall LIBSPARSE.$convertCoordMangled(arg1::Cint, arg2::Cint, arg3::Clong, arg4::Cuchar, arg5::$att_type,
+                                                    arg6::Ptr{Cint}, arg7::Ptr{Cint}, arg8::Ptr{$T})::SparseMatrix{$T}
         end
     end
 
-    local uConvertCoordMangled = T == Cfloat ? :(:_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKdPvS4_) :
-                                            :(:_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKfPvS4_)
+    local uConvertCoordMangled = T == Cfloat ? :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKdPvS4_ :
+                                            :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKfPvS4_
     @eval begin
         function SparseConvertFromCoord(arg1::Cint, arg2::Cint, arg3::Clong, arg4::Cuchar, arg5::$att_type,
                     arg6::Ptr{Cint}, arg7::Ptr{Cint}, arg8::Ptr{$T}, arg9::Ptr{Cvoid}, arg10::Ptr{Cvoid})
-            ccall(($uConvertCoordMangled, LIBSPARSE), SparseMatrix{$T},
-                    (Cint, Cint, Clong, Cuchar, $att_type, Ptr{Cint}, Ptr{Cint}, Ptr{$T}, Ptr{Cvoid}, Ptr{Cvoid}),
-                    arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10)
+            @ccall LIBSPARSE.$uConvertCoordMangled(arg1::Cint, arg2::Cint, arg3::Clong, arg4::Cuchar, arg5::$att_type,
+                    arg6::Ptr{Cint}, arg7::Ptr{Cint}, arg8::Ptr{$T}, arg9::Ptr{Cvoid}, arg10::Ptr{Cvoid})::SparseMatrix{$T}
         end
     end
-end
-
 end
