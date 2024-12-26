@@ -3,8 +3,8 @@ module AASparseSolvers
 include("wrappers.jl")
 
 # utility function mostly for testing.
-# TODO: convert to a SparseArray instead.
-function SparseToDense(A::SparseMatrix{T}) where T <: Union{Cdouble, Cfloat}
+# TODO: convert to a SparseArray instead?
+function SparseToMatrix(A::SparseMatrix{T}) where T <: Union{Cdouble, Cfloat}
     s = A.structure
     rows = s.blockSize*s.rowCount
     cols = s.blockSize*s.columnCount
@@ -42,6 +42,39 @@ function SparseToDense(A::SparseMatrix{T}) where T <: Union{Cdouble, Cfloat}
         end
     end
     return B
+end
+
+function DenseToMatrix(A::DenseMatrix{T}) where T <: vTypes
+    rows, cols = A.rowCount, A.columnCount
+    B = zeros(T, rows, cols)
+    r, c = 1, 1
+    for i in 1:(rows*cols)
+        B[r, c] = unsafe_load(A.data, i)
+        if (r == rows)
+            c += 1
+            r = 1
+        else
+            r += 1
+        end
+    end
+    return B
+end
+
+mutable struct AASparseMatrix{T <: Union{Cfloat, Cdouble}}
+    jl_data::SparseMatrixCSC{T, Int64}
+    aa_matrix::SparseMatrix{T}
+    # these don't *quite* match the jl_data's fields: 1 vs 0 indexing,
+    # Cint vs Clong for row indices.
+    _col_inds::Vector{Clong}
+    _row_inds::Vector{Cint}
+end
+
+function AASparseMatrix(A::SparseMatrixCSC{T, Int64}) where T <: Union{Cfloat, Cdouble}
+    res = AASparseMatrix(A, SparseMatrix{T}(), A.colptr .- 1,  Cint.(A.rowval) .- 1)
+    res.aa_matrix.structure = SparseMatrixStructure(A.m, A.n, pointer(res._col_inds),
+                                                pointer(res._row_inds), ATT_ORDINARY, 1)
+    res.aa_matrix.data = pointer(A)
+    return res
 end
 
 end # module AASparseSolvers
