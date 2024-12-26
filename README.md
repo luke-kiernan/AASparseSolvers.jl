@@ -1,2 +1,2 @@
 # AASparseSolvers.jl
-A Julia interface for Apple Accelerate's LibSparse sparse matrix library.
+A Julia interface for Apple Accelerate's LibSparse sparse matrix library. For the header on which it is based, see: `/Library/Developer/CommandLineTools/SDKs/MacOSX15.sdk/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/Headers/Sparse/Solve.h`. (You may need to replace `MacOSX15` the current version number.)
