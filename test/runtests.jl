@@ -63,24 +63,59 @@ using SparseArrays
         @test(AASparseSolvers.SparseToMatrix(AASparseSolvers.SparseMatrix{Cfloat}(x, pointer(v))) == Cfloat.(expected))
     end
 end
-@testset "Basic matrix multiply" begin
-    dense_data = rand(Float32, 3,3)
-    dense2_data = zeros(Float32, 3,3)
-    columnStarts = Clong[0, 2, 4, 5]
-    rowIndices = Cint[0, 2, 0, 1, 2]
-    sparse_data = Cfloat[1.0, 0.1, 9.2, 0.3, 0.5, 1.3, 0.2, 1.3, 4.5]
-    
-    GC.@preserve dense_data dense2_data columnStarts rowIndices sparse_data begin
-        dense = AASparseSolvers.DenseMatrix{Cfloat}(3, 3, 3, 0, pointer(dense_data))
-        dense2 = AASparseSolvers.DenseMatrix{Cfloat}(3, 3, 3, 0, pointer(dense2_data))
-        s = AASparseSolvers.SparseMatrixStructure(3, 3,
-            pointer(columnStarts), pointer(rowIndices),
-            AASparseSolvers.ATT_ORDINARY, 1
-        )
-        sparse_matrix = AASparseSolvers.SparseMatrix{Cfloat}(s, pointer(sparse_data))
+@testset "SparseMultiply and SparseMultiplyAdd" begin
+    # less copy-paste heavy way?
+    for T in (Float32, Float64)
+        @eval begin
+            dense_data = rand($T, 3,3)
+            denseV_data = rand($T, 3)
+            dense2_data = zeros($T, 3,3)
+            denseV2_data = zeros($T, 3)
+            sparseM = sprand($T, 3, 3, 0.5)
+            sparse_data = sparseM.nzval
+            col_inds = sparseM.colptr .+ -1
+            row_inds = Cint.(sparseM.rowval .+ -1)
+            GC.@preserve dense_data denseV_data dense2_data denseV2_data col_inds row_inds sparse_data begin
+                s = AASparseSolvers.SparseMatrixStructure(3, 3,
+                    pointer(col_inds), pointer(row_inds),
+                    AASparseSolvers.ATT_ORDINARY, 1
+                )
+                sparse_matrix = AASparseSolvers.SparseMatrix{$T}(s, pointer(sparse_data))
+                dense = AASparseSolvers.DenseMatrix{$T}(3, 3, 3, 0, pointer(dense_data))
+                dense2 = AASparseSolvers.DenseMatrix{$T}(3, 3, 3, 0, pointer(dense2_data))
+                denseV = AASparseSolvers.DenseVector{$T}(3, pointer(denseV_data))
+                denseV2 = AASparseSolvers.DenseVector{$T}(3, pointer(denseV2_data))
+                AASparseSolvers.SparseMultiply(sparse_matrix, dense, dense2)
+                @test dense2_data ≈ sparseM * dense_data
+                AASparseSolvers.SparseMultiply(sparse_matrix, denseV, denseV2)
+                @test denseV2_data ≈ sparseM * denseV_data
+                scalar = rand($T)
+                AASparseSolvers.SparseMultiply(scalar, sparse_matrix, dense, dense2)
+                @test dense2_data ≈ scalar * sparseM * dense_data
+                AASparseSolvers.SparseMultiply(scalar, sparse_matrix, denseV, denseV2)
+                @test denseV2_data ≈ scalar * sparseM * denseV_data
+            end
+            # putting the fills inside the GC.@preserve caused memory errors.
+            fill!(dense2_data, 1.0)
+            fill!(denseV2_data, 1.0)
+            GC.@preserve dense_data denseV_data dense2_data denseV2_data col_inds row_inds sparse_data begin
+                AASparseSolvers.SparseMultiplyAdd(sparse_matrix, dense, dense2)
+                @test dense2_data ≈ ones(size(dense2_data))+sparseM * dense_data
+                AASparseSolvers.SparseMultiplyAdd(sparse_matrix, denseV, denseV2)
+                @test denseV2_data ≈ ones(size(denseV2_data))+sparseM * denseV_data
+            end
 
-        AASparseSolvers.SparseMultiply(sparse_matrix, dense, dense2)
-        @test dense2_data ≈ AASparseSolvers.SparseToMatrix(sparse_matrix) * dense_data
+            fill!(dense2_data, 1.0)
+            fill!(denseV2_data, 1.0)
+            GC.@preserve dense_data denseV_data dense2_data denseV2_data col_inds row_inds sparse_data begin
+                scalar = rand($T)
+                AASparseSolvers.SparseMultiplyAdd(scalar, sparse_matrix, dense, dense2)
+                @test dense2_data ≈ ones(size(dense2_data))+ scalar * sparseM * dense_data
+                AASparseSolvers.SparseMultiplyAdd(scalar, sparse_matrix, denseV, denseV2)
+                @test denseV2_data ≈ ones(size(denseV2_data))+ scalar * sparseM * denseV_data
+            end
+
+        end
     end
 end 
 
@@ -101,19 +136,40 @@ end
     end
 end=#
 
-@testset "Cconvert DenseMatrix" begin
-    dense = rand(Float32, 3,3)
-    dense2 = zeros(Float32, 3, 3)
-    columnStarts = Clong[0, 2, 4, 5]
-    rowIndices = Cint[0, 2, 0, 1, 2]
-    sparse_data = Cfloat[1.0, 0.1, 9.2, 0.3, 0.5, 1.3, 0.2, 1.3, 4.5]
-    
-    GC.@preserve dense columnStarts rowIndices sparse_data begin
+@testset "cconvert and unsafe_convert" begin
+    dense = rand(3,3)
+    denseV = rand(3)
+    dense2 = zeros(3, 3)
+    denseV2 = zeros(3)
+    sparseM = sprand(3, 3, 0.5)
+    sparse_data = sparseM.nzval
+    col_inds = sparseM.colptr .+ -1
+    row_inds = Cint.(sparseM.rowval .+ -1)
+    # for lack of a way to call cconvert directly, I'll use the matrix multiply routines.
+    GC.@preserve dense dense2 denseV denseV2 sparse_data col_inds row_inds begin
         s = AASparseSolvers.SparseMatrixStructure(3, 3,
-                pointer(columnStarts), pointer(rowIndices),
+                pointer(col_inds), pointer(row_inds),
                 0, 1)
-        sparse_matrix = AASparseSolvers.SparseMatrix{Cfloat}(s, pointer(sparse_data))
+        sparse_matrix = AASparseSolvers.SparseMatrix{Cdouble}(s, pointer(sparse_data))
         AASparseSolvers.SparseMultiply(sparse_matrix, dense, dense2)
-        @test dense2 ≈ AASparseSolvers.SparseToMatrix(sparse_matrix) * dense
+        @test dense2 ≈ sparseM * dense
+        AASparseSolvers.SparseMultiply(sparse_matrix, denseV, denseV2)
+        @test denseV2 ≈ sparseM * denseV 
     end
+end
+
+# TODO: this one *usually* works, which says I still have memory issues somewhere.
+# I don't want to have to GC.@preserve for each and every operation, though.
+@testset "AASparseMatrix constructor and *" begin
+    jlA = sprand(Float64, 3,3,0.5)
+    aaA = AASparseMatrix{Float64}(jlA.m, jlA.n, jlA.colptr, jlA.rowval, jlA.nzval)
+    x = rand(Float64, 3)
+    y = zeros(Float64, 3)
+    #=
+    z = jlA.nzval
+    GC.@preserve x jlA aaA y z begin
+        AASparseSolvers.mult(aaA, x, y)
+        @test y ≈ Array(jlA) * x
+    end=#
+    @test aaA * x ≈ jlA * x
 end

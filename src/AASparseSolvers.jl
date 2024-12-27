@@ -60,21 +60,55 @@ function DenseToMatrix(A::DenseMatrix{T}) where T <: vTypes
     return B
 end
 
+# do I need this to be mutable?
 mutable struct AASparseMatrix{T <: Union{Cfloat, Cdouble}}
-    jl_data::SparseMatrixCSC{T, Int64}
     aa_matrix::SparseMatrix{T}
-    # these don't *quite* match the jl_data's fields: 1 vs 0 indexing,
+    # these don't *quite* match SparseArrayCSC fields: 1 vs 0 indexing,
     # Cint vs Clong for row indices.
     _col_inds::Vector{Clong}
     _row_inds::Vector{Cint}
+    _data::Vector{T}
 end
 
-function AASparseMatrix(A::SparseMatrixCSC{T, Int64}) where T <: Union{Cfloat, Cdouble}
-    res = AASparseMatrix(A, SparseMatrix{T}(), A.colptr .- 1,  Cint.(A.rowval) .- 1)
-    res.aa_matrix.structure = SparseMatrixStructure(A.m, A.n, pointer(res._col_inds),
-                                                pointer(res._row_inds), ATT_ORDINARY, 1)
-    res.aa_matrix.data = pointer(A)
-    return res
+function AASparseMatrix{T}(m::Integer, n::Integer, colptr::Vector{Int64},
+                            rowval::Union{Vector{Int64}, Vector{Int32}}, nzval::Vector{T}) where T <: Union{Cfloat, Cdouble}
+    c = colptr .+ -1
+    r = Cint.(rowval .+ -1)
+    s = SparseMatrixStructure(m, n, pointer(c), pointer(r), ATT_ORDINARY, 1)
+    m = SparseMatrix{T}(s, pointer(nzval))
+    obj = AASparseMatrix{T}(m, c, r, nzval)
+    @assert(obj.aa_matrix.data == pointer(obj._data))
+    @assert(obj.aa_matrix.structure.columnStarts == pointer(obj._col_inds))
+    @assert(obj.aa_matrix.structure.rowIndices == pointer(obj._row_inds))
+    return obj
 end
+
+# I could also do multiplication by scalar, but there's no point in doing the ccall
+# for that one: just multiply the vector.
+
+# keeping this around for troubleshooting reasons.
+#=function mult(A::AASparseMatrix{T}, x::S, y::S) where S<:Union{Matrix{T},Vector{T}} where T <:AASparseSolvers.vTypes
+    @assert size(x)[1] == A.aa_matrix.structure.columnCount
+    @assert size(y)[1] == A.aa_matrix.structure.rowCount
+    display(y)
+    sleep(2)
+    if length(size(x)) == 2
+        @assert size(y)[2] == size(x)[2]
+    end
+    # this C call also goes awry. so allocating y inside the function doesn't seem to be the problem.
+    a, b, c = A._col_inds, A._row_inds, A._data
+    GC.@preserve a b c SparseMultiply(A.aa_matrix, x, y) # only passing a reference, not the object
+    return nothing
+end=#
+function Base.:(*)(A::AASparseMatrix{T}, x::Union{Matrix{T},Vector{T}}) where T<:AASparseSolvers.vTypes
+    @assert size(x)[1] == A.aa_matrix.structure.columnCount
+    y = Array{T}(undef, A.aa_matrix.structure.rowCount, size(x)[2:end]...)
+    if length(size(x)) == 2
+        @assert size(y)[2] == size(x)[2]
+    end
+    SparseMultiply(A.aa_matrix, x, y)
+    return y
+end
+export AASparseMatrix
 
 end # module AASparseSolvers
