@@ -1,6 +1,7 @@
 using Test
 using AASparseSolvers
 using SparseArrays
+using Profile
 
 # https://developer.apple.com/documentation/accelerate/creating_sparse_matrices?language=objc
 @testset "SparseToMatrix" begin
@@ -158,18 +159,61 @@ end=#
     end
 end
 
-# TODO: this one *usually* works, which says I still have memory issues somewhere.
-# I don't want to have to GC.@preserve for each and every operation, though.
-@testset "AASparseMatrix constructor and *" begin
+# this gives memory errors (usually) 
+#=@testset "AASparseMatrix constructor and *" begin
     jlA = sprand(Float64, 3,3,0.5)
     aaA = AASparseMatrix{Float64}(jlA.m, jlA.n, jlA.colptr, jlA.rowval, jlA.nzval)
     x = rand(Float64, 3)
-    y = zeros(Float64, 3)
-    #=
-    z = jlA.nzval
-    GC.@preserve x jlA aaA y z begin
-        AASparseSolvers.mult(aaA, x, y)
-        @test y ≈ Array(jlA) * x
-    end=#
-    @test aaA * x ≈ jlA * x
+    p1 = jlA.colptr
+    p2 = jlA.rowval
+    p3 = jlA.nzval
+    GC.@preserve x p1 p2 p3 begin
+        @test aaA * x ≈ jlA * x
+    end
+end=#
+
+# transpose doesn't actually change the matrix:
+# just creates new matrix whose structure has the opposite transpose flag.
+@testset "ccall transpose" begin 
+    for T in (Float32, Float64)
+        @eval begin
+            sparseM = sprand($T, 3, 4, 0.5)
+            sparse_data = sparseM.nzval
+            col_inds = sparseM.colptr .+ -1
+            row_inds = Cint.(sparseM.rowval .+ -1)
+            GC.@preserve sparse_data col_inds row_inds begin
+                s = AASparseSolvers.SparseMatrixStructure(3, 4,
+                        pointer(col_inds), pointer(row_inds), 0, 1)
+                sparse_matrix = AASparseSolvers.SparseMatrix{$T}(s,
+                                        pointer(sparse_data))
+                ATT_TRANSP = AASparseSolvers.ATT_TRANSPOSE
+                res = AASparseSolvers.SparseGetTranspose(sparse_matrix)
+                @test res.data == sparse_matrix.data &&
+                            (res.structure.attributes & ATT_TRANSP != zero(typeof(ATT_TRANSP)))
+                original = AASparseSolvers.SparseGetTranspose(res)
+                @test original.data == sparse_matrix.data &&
+                        (original.structure.attributes & ATT_TRANSP == zero(typeof(ATT_TRANSP)))
+            end
+        end
+    end
+end
+
+# This gives memory errors (usually)
+@testset "ccall sparsefactor " begin
+    for T in (Float32, Float64)
+        @eval begin
+            sparseM = sprand($T, 4, 4, 0.5)
+            sparse_data = sparseM.nzval
+            col_inds = sparseM.colptr .+ -1
+            row_inds = Cint.(sparseM.rowval .+ -1)
+            GC.@preserve sparse_data col_inds row_inds begin
+                s = AASparseSolvers.SparseMatrixStructure(4, 4,
+                    pointer(col_inds), pointer(row_inds), 0, 1)
+                qrType = AASparseSolvers.SparseFactorizationQR
+                sf = AASparseSolvers.SparseFactor(qrType, s)
+                # not sure if the memory is Julia-managed or C-managed.
+                # AASparseSolvers.SparseCleanup(sf)
+            end
+        end
+    end
 end

@@ -124,6 +124,7 @@ struct SparseOpaqueSymbolicFactorization
     factorSize_Float::Csize_t
     factorSize_Double::Csize_t
 end
+const SymbolicFactor = SparseOpaqueSymbolicFactorization
 
 # TODO: I have T here to match the C: _Double, _Float variants. But T isn't used!!
 mutable struct SparseOpaqueFactorization{T<:vTypes}
@@ -136,6 +137,7 @@ mutable struct SparseOpaqueFactorization{T<:vTypes}
     solveWorkspaceRequiredPerRHS::Csize_t
 end
 
+const Factor{T} = SparseOpaqueFactorization{T}
 # ignore for now: anything involving Subfactor, Preconditioner, or IterativeMethod
 
 LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libSparse.dylib"
@@ -294,7 +296,7 @@ for T in (Cfloat, Cdouble)
     local ofTransposeMangled = T == Cfloat ? :_Z18SparseGetTranspose31SparseOpaqueFactorization_Float :
                                         :_Z18SparseGetTranspose32SparseOpaqueFactorization_Double
     @eval begin
-        function SparseGetTranpose(arg1::SparseOpaqueFactorization{$T})
+        function SparseGetTranspose(arg1::SparseOpaqueFactorization{$T})
             @ccall LIBSPARSE.$ofTransposeMangled(arg1::SparseOpaqueFactorization{$T})::SparseOpaqueFactorization{$T}
         end
     end
@@ -331,8 +333,39 @@ for T in (Cfloat, Cdouble)
     
     # TODO: SparseFactor, on SparseMatrix{T} and SparseMatrixStructure.
     # after those, probably do SparseRetain.
-end
 
-SparseCleanup(arg1::SparseOpaqueSymbolicFactorization) = @ccall (
+    # line 1537 in header.
+    local sparseFactorMatrix = T == Cfloat ? :_Z12SparseFactorh18SparseMatrix_Float :
+                                                :_Z12SparseFactorh19SparseMatrix_Double
+    @eval begin
+        function SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrix{$T})::Factor{$T}
+            @ccall LIBSPARSE.$sparseFactorMatrix(arg1::SparseFactorization_t, arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
+        end
+    end
+
+    # line 1733 in header.
+    # local sparseSolve = T == Cfloat ? :
+    local sparseSolveInplace = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_Float :
+                                            :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_Double
+    @eval SparseSolve(arg1::Factor{$T}, arg2::Union{Matrix{$T}, DenseMatrix{$T}}) = @ccall (
+        LIBSPARSE.$sparseSolveInplace(arg1::Factor{$T}, arg2::DenseMatrix{$T})::Cvoid
+    )
+end
+SparseCleanup(arg1::SymbolicFactor) = @ccall (
         LIBSPARSE._Z13SparseCleanup33SparseOpaqueSymbolicFactorization(
-                                arg1::SparseOpaqueSymbolicFactorization))::Cvoid
+                                arg1::SymbolicFactor))::Cvoid
+# If you look at SolveImplementation.h, this just calls
+# _SparseSymbolicFactorQR(type, &Matrix, &options);
+SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrixStructure) = @ccall (
+    LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure(
+        arg1::SparseFactorization_t, arg2::SparseMatrixStructure
+    )::SymbolicFactor
+)
+# Maybe this will work better and not produce memory errors??
+# But then I need to figure out sensible defaults for the options
+SparseFactorQR(arg1::Ref{SparseMatrixStructure}, 
+                arg2::Ref{SparseSymbolicFactorOptions}) = @ccall (
+    LIBSPARSE._SparseSymbolicFactorQR(SparseFactorizationQR::SparseFactorization_t,
+                arg1::Ptr{SparseMatrixStructure},
+                arg2::Ptr{SparseSymbolicFactorOptions})::SymbolicFactor
+)
