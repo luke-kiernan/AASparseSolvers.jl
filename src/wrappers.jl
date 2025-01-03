@@ -51,8 +51,7 @@ end
 
 # can't pack bitflags in raw Julia, so can't implement SparseAttributes
 # directly. Workaround with flags:
-const att_type = Cuchar # I'm not sure if this is correct.
-# it may not matter, though, for alignment reasons.
+const att_type = Cshort
 const ATT_TRANSPOSE = att_type(1)
 const ATT_LOWER_TRIANGLE = att_type(0)
 const ATT_UPPER_TRIANGLE = att_type(2)
@@ -60,6 +59,7 @@ const ATT_ORDINARY = att_type(0)
 const ATT_TRIANGULAR = att_type(4)
 const ATT_UNIT_TRIANGULAR = att_type(8)
 const ATT_SYMMETRIC = att_type(12)
+const ATT_ALLOCATED_BY_SPARSE = att_type(1) << (8*sizeof(att_type)-1)
 
 const vTypes = Union{Cfloat, Cdouble}
 
@@ -124,7 +124,7 @@ struct SparseOpaqueSymbolicFactorization
     factorSize_Float::Csize_t
     factorSize_Double::Csize_t
 end
-const SymbolicFactor = SparseOpaqueSymbolicFactorization
+# const SymbolicFactor = SparseOpaqueSymbolicFactorization
 
 # TODO: I have T here to match the C: _Double, _Float variants. But T isn't used!!
 mutable struct SparseOpaqueFactorization{T<:vTypes}
@@ -137,7 +137,7 @@ mutable struct SparseOpaqueFactorization{T<:vTypes}
     solveWorkspaceRequiredPerRHS::Csize_t
 end
 
-const Factor{T} = SparseOpaqueFactorization{T}
+# const Factor{T} = SparseOpaqueFactorization{T}
 # ignore for now: anything involving Subfactor, Preconditioner, or IterativeMethod
 
 LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libSparse.dylib"
@@ -338,7 +338,7 @@ for T in (Cfloat, Cdouble)
     local sparseFactorMatrix = T == Cfloat ? :_Z12SparseFactorh18SparseMatrix_Float :
                                                 :_Z12SparseFactorh19SparseMatrix_Double
     @eval begin
-        function SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrix{$T})::Factor{$T}
+        function SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
             @ccall LIBSPARSE.$sparseFactorMatrix(arg1::SparseFactorization_t, arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
         end
     end
@@ -347,19 +347,19 @@ for T in (Cfloat, Cdouble)
     # local sparseSolve = T == Cfloat ? :
     local sparseSolveInplace = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_Float :
                                             :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_Double
-    @eval SparseSolve(arg1::Factor{$T}, arg2::Union{Matrix{$T}, DenseMatrix{$T}}) = @ccall (
-        LIBSPARSE.$sparseSolveInplace(arg1::Factor{$T}, arg2::DenseMatrix{$T})::Cvoid
+    @eval SparseSolve(arg1::SparseOpaqueFactorization{$T}, arg2::Union{Matrix{$T}, DenseMatrix{$T}}) = @ccall (
+        LIBSPARSE.$sparseSolveInplace(arg1::SparseOpaqueFactorization{$T}, arg2::DenseMatrix{$T})::Cvoid
     )
 end
-SparseCleanup(arg1::SymbolicFactor) = @ccall (
+SparseCleanup(arg1::SparseOpaqueSymbolicFactorization) = @ccall (
         LIBSPARSE._Z13SparseCleanup33SparseOpaqueSymbolicFactorization(
-                                arg1::SymbolicFactor))::Cvoid
+                                arg1::SparseOpaqueSymbolicFactorization))::Cvoid
 # If you look at SolveImplementation.h, this just calls
 # _SparseSymbolicFactorQR(type, &Matrix, &options);
 SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrixStructure) = @ccall (
     LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure(
         arg1::SparseFactorization_t, arg2::SparseMatrixStructure
-    )::SymbolicFactor
+    )::SparseOpaqueSymbolicFactorization
 )
 # Maybe this will work better and not produce memory errors??
 # But then I need to figure out sensible defaults for the options
@@ -367,5 +367,5 @@ SparseFactorQR(arg1::Ref{SparseMatrixStructure},
                 arg2::Ref{SparseSymbolicFactorOptions}) = @ccall (
     LIBSPARSE._SparseSymbolicFactorQR(SparseFactorizationQR::SparseFactorization_t,
                 arg1::Ptr{SparseMatrixStructure},
-                arg2::Ptr{SparseSymbolicFactorOptions})::SymbolicFactor
+                arg2::Ptr{SparseSymbolicFactorOptions})::SparseOpaqueSymbolicFactorization
 )

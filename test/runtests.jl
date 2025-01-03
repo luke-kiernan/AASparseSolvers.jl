@@ -150,7 +150,7 @@ end=#
     GC.@preserve dense dense2 denseV denseV2 sparse_data col_inds row_inds begin
         s = AASparseSolvers.SparseMatrixStructure(3, 3,
                 pointer(col_inds), pointer(row_inds),
-                0, 1)
+                AASparseSolvers.ATT_ORDINARY, 1)
         sparse_matrix = AASparseSolvers.SparseMatrix{Cdouble}(s, pointer(sparse_data))
         AASparseSolvers.SparseMultiply(sparse_matrix, dense, dense2)
         @test dense2 ≈ sparseM * dense
@@ -183,7 +183,8 @@ end=#
             row_inds = Cint.(sparseM.rowval .+ -1)
             GC.@preserve sparse_data col_inds row_inds begin
                 s = AASparseSolvers.SparseMatrixStructure(3, 4,
-                        pointer(col_inds), pointer(row_inds), 0, 1)
+                        pointer(col_inds), pointer(row_inds),
+                        AASparseSolvers.ATT_ORDINARY, 1)
                 sparse_matrix = AASparseSolvers.SparseMatrix{$T}(s,
                                         pointer(sparse_data))
                 ATT_TRANSP = AASparseSolvers.ATT_TRANSPOSE
@@ -208,7 +209,8 @@ end
             row_inds = Cint.(sparseM.rowval .+ -1)
             GC.@preserve sparse_data col_inds row_inds begin
                 s = AASparseSolvers.SparseMatrixStructure(4, 4,
-                    pointer(col_inds), pointer(row_inds), 0, 1)
+                    pointer(col_inds), pointer(row_inds),
+                    AASparseSolvers.ATT_ORDINARY, 1)
                 qrType = AASparseSolvers.SparseFactorizationQR
                 sf = AASparseSolvers.SparseFactor(qrType, s)
                 # not sure if the memory is Julia-managed or C-managed.
