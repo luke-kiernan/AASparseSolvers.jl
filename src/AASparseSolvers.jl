@@ -70,9 +70,9 @@ mutable struct AASparseMatrix{T <: Union{Cfloat, Cdouble}}
     _data::Vector{T}
 end
 
-function AASparseMatrix{T}(m::Integer, n::Integer, colptr::Vector{Int64},
+function AASparseMatrix{T}(m::Integer, n::Integer, colptr::Union{Vector{Int64}, Vector{Int32}},
                             rowval::Union{Vector{Int64}, Vector{Int32}}, nzval::Vector{T}) where T <: Union{Cfloat, Cdouble}
-    c = colptr .+ -1
+    c = Clong.(colptr .+ -1)
     r = Cint.(rowval .+ -1)
     s = SparseMatrixStructure(m, n, pointer(c), pointer(r), ATT_ORDINARY, 1)
     m = SparseMatrix{T}(s, pointer(nzval))

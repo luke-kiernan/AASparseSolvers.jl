@@ -74,7 +74,7 @@ end
             denseV2_data = zeros($T, 3)
             sparseM = sprand($T, 3, 3, 0.5)
             sparse_data = sparseM.nzval
-            col_inds = sparseM.colptr .+ -1
+            col_inds =  Clong.(sparseM.colptr .+ -1)
             row_inds = Cint.(sparseM.rowval .+ -1)
             GC.@preserve dense_data denseV_data dense2_data denseV2_data col_inds row_inds sparse_data begin
                 s = AASparseSolvers.SparseMatrixStructure(3, 3,
@@ -137,14 +137,14 @@ end
     end
 end=#
 
-@testset "cconvert and unsafe_convert" begin
+@testset "cconvert and unsafe_convert dense" begin
     dense = rand(3,3)
     denseV = rand(3)
     dense2 = zeros(3, 3)
     denseV2 = zeros(3)
     sparseM = sprand(3, 3, 0.5)
     sparse_data = sparseM.nzval
-    col_inds = sparseM.colptr .+ -1
+    col_inds =  Clong.(sparseM.colptr .+ -1)
     row_inds = Cint.(sparseM.rowval .+ -1)
     # for lack of a way to call cconvert directly, I'll use the matrix multiply routines.
     GC.@preserve dense dense2 denseV denseV2 sparse_data col_inds row_inds begin
@@ -159,16 +159,29 @@ end=#
     end
 end
 
-# this gives memory errors (usually) 
-#=@testset "AASparseMatrix constructor and *" begin
-    jlA = sprand(Float64, 3,3,0.5)
-    aaA = AASparseMatrix{Float64}(jlA.m, jlA.n, jlA.colptr, jlA.rowval, jlA.nzval)
-    x = rand(Float64, 3)
-    p1 = jlA.colptr
-    p2 = jlA.rowval
-    p3 = jlA.nzval
-    GC.@preserve x p1 p2 p3 begin
-        @test aaA * x ≈ jlA * x
+
+#=@testset "cconvert and unsafe_convert sparse" begin
+    A = SparseMatrixCSC{Float64, Int32}(Array(sprand(Float64, 4, 4, 0.5)))
+    x = rand(Float64, 4)
+    res = zeros(Float64, 4)
+    AASparseSolvers.SparseMultiply(A, x, res)
+    @test res ≈ A*x
+end=#
+
+# this gives memory errors (sometimes)
+#= @testset "AASparseMatrix constructor and *" begin
+    for T in (Float32, Float64)
+        @eval begin
+            jlA = sprand($T, 3, 3, 0.5)
+            x = rand($T, 3)
+            p1 = jlA.colptr
+            p2 = jlA.rowval
+            p3 = jlA.nzval
+            aaA = AASparseMatrix{$T}(jlA.m, jlA.n, p1, p2, p3)
+            GC.@preserve x p1 p2 p3 jlA aaA begin
+                @test aaA * x ≈ Array(jlA) * x
+            end
+        end
     end
 end=#
 
@@ -179,7 +192,7 @@ end=#
         @eval begin
             sparseM = sprand($T, 3, 4, 0.5)
             sparse_data = sparseM.nzval
-            col_inds = sparseM.colptr .+ -1
+            col_inds =  Clong.(sparseM.colptr .+ -1)
             row_inds = Cint.(sparseM.rowval .+ -1)
             GC.@preserve sparse_data col_inds row_inds begin
                 s = AASparseSolvers.SparseMatrixStructure(3, 4,
@@ -200,19 +213,30 @@ end=#
 end
 
 # This gives memory errors (usually)
+
 @testset "ccall sparsefactor " begin
     for T in (Float32, Float64)
         @eval begin
             sparseM = sprand($T, 4, 4, 0.5)
             sparse_data = sparseM.nzval
-            col_inds = sparseM.colptr .+ -1
+            col_inds = Clong.(sparseM.colptr .+ -1)
             row_inds = Cint.(sparseM.rowval .+ -1)
-            GC.@preserve sparse_data col_inds row_inds begin
+            expected = rand($T, 4, 4)
+            B = Array(sparseM) * expected
+            GC.@preserve sparse_data col_inds row_inds B begin
                 s = AASparseSolvers.SparseMatrixStructure(4, 4,
                     pointer(col_inds), pointer(row_inds),
                     AASparseSolvers.ATT_ORDINARY, 1)
+                sparse_matrix = AASparseSolvers.SparseMatrix{$T}(s,
+                                        pointer(sparse_data))
                 qrType = AASparseSolvers.SparseFactorizationQR
-                sf = AASparseSolvers.SparseFactor(qrType, s)
+                GC.@preserve s sparse_matrix begin
+                    f = AASparseSolvers.SparseFactor(qrType, sparse_matrix)
+                    GC.@preserve f begin
+                        AASparseSolvers.SparseSolve(f, B)
+                        @test B ≈ expected
+                    end
+                end
                 # not sure if the memory is Julia-managed or C-managed.
                 # AASparseSolvers.SparseCleanup(sf)
             end

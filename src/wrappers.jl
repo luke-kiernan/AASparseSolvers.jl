@@ -140,15 +140,15 @@ end
 # const Factor{T} = SparseOpaqueFactorization{T}
 # ignore for now: anything involving Subfactor, Preconditioner, or IterativeMethod
 
-LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libSparse.dylib"
+const LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libSparse.dylib"
 
-#= function Base.cconvert(::Type{SparseMatrix{T}}, jl::SparseMatrixCSC{T, Int64}) where T<:vTypes
+#=function Base.cconvert(::Type{SparseMatrix{T}}, jl::SparseMatrixCSC{T, Int64}) where T<:vTypes
     println("in cconvert")
     sleep(2)
-    reindexedCols = jl.colptr .+ -1
+    reindexedCols = Clong.(jl.colptr .+ -1)
     reindexedRows = Cint.(jl.rowval .+ -1)
     return (jl, SparseMatrix{T}(
-        SparseMatrixStructure(jl.m, jl.n, C_NULL, C_NULL, ATT_ORDINARY, 1),
+        SparseMatrixStructure(jl.m, jl.n, pointer(reindexedCols), pointer(reindexedRows), ATT_ORDINARY, 1),
         C_NULL
     ), reindexedCols, reindexedRows)
 end
@@ -161,8 +161,8 @@ function Base.unsafe_convert(::Type{SparseMatrix{T}}, tup::Tuple{SparseMatrixCSC
     # I think it's failing because this is a new allocation, when
     # "all allocations of memory that will be accessed by the C code"
     # should be performed inside cconvert.
-    # SparseMatrixStructure must be immutable, though, so there's no
-    # easy way to change the fields
+    # I could get around this by allocating empty buffers of the correct size
+    # (Ref's to buffers of undefs?) then fill them here
     apple.structure = SparseMatrixStructure(jl.m, jl.n,
                                 pointer(c), pointer(r),
                                 ATT_ORDINARY, 1)
