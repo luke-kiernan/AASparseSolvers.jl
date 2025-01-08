@@ -118,24 +118,7 @@ end
 
         end
     end
-end 
-
-#=@testset "Sparse matrix SparseMatrixHacky" begin
-    dense_data = rand(Float32, 3,3)
-    dense2_data = zeros(Float32, 3,3)
-    columnStarts = Clong[0, 2, 4, 5]
-    rowIndices = Cint[0, 2, 0, 1, 2]
-    sparse_data = Cfloat[1.0, 0.1, 9.2, 0.3, 0.5, 1.3, 0.2, 1.3, 4.5]
-
-    GC.@preserve dense_data dense2_data columnStarts rowIndices sparse_data begin
-        dense = AASparseSolvers.DenseMatrix{Cfloat}(3, 3, 3, 0, pointer(dense_data))
-        dense2 = AASparseSolvers.DenseMatrix{Cfloat}(3, 3, 3, 0, pointer(dense2_data))
-        sparse_matrix = AASparseSolvers.SparseMatrixHacky{Cfloat}(3, 3, pointer(columnStarts), pointer(rowIndices), AASparseSolvers.ATT_ORDINARY, 1, pointer(sparse_data))
-
-        AASparseSolvers.SparseMultiply(sparse_matrix, dense, dense2)
-        @test dense2_data ≈ AASparseSolvers.SparseToMatrix(sparse_matrix) * dense_data
-    end
-end=#
+end
 
 @testset "cconvert and unsafe_convert dense" begin
     dense = rand(3,3)
@@ -218,7 +201,7 @@ end
     for T in (Float32, Float64)
         @eval begin
             sparseM = sprand($T, 4, 4, 0.5)
-            sparse_data = sparseM.nzval
+            sparse_data = copy(sparseM.nzval)
             col_inds = Clong.(sparseM.colptr .+ -1)
             row_inds = Cint.(sparseM.rowval .+ -1)
             expected = rand($T, 4, 4)
@@ -229,14 +212,13 @@ end
                     AASparseSolvers.ATT_ORDINARY, 1)
                 sparse_matrix = AASparseSolvers.SparseMatrix{$T}(s,
                                         pointer(sparse_data))
+                dense_matrix = AASparseSolvers.DenseMatrix{$T}(
+                    4, 4, 4, AASparseSolvers.ATT_ORDINARY, pointer(B)
+                )
                 qrType = AASparseSolvers.SparseFactorizationQR
-                GC.@preserve s sparse_matrix begin
-                    f = AASparseSolvers.SparseFactor(qrType, sparse_matrix)
-                    GC.@preserve f begin
-                        AASparseSolvers.SparseSolve(f, B)
-                        @test B ≈ expected
-                    end
-                end
+                f = AASparseSolvers.SparseFactor(qrType, sparse_matrix)
+                AASparseSolvers.SparseSolve(f, dense_matrix)
+                @test B ≈ expected
                 # not sure if the memory is Julia-managed or C-managed.
                 # AASparseSolvers.SparseCleanup(sf)
             end

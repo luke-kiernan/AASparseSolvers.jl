@@ -51,6 +51,7 @@ end
 
 # can't pack bitflags in raw Julia, so can't implement SparseAttributes
 # directly. Workaround with flags:
+# FIXME: this is messing with the field alignment of structs!
 const att_type = Cshort
 const ATT_TRANSPOSE = att_type(1)
 const ATT_LOWER_TRIANGLE = att_type(0)
@@ -92,7 +93,7 @@ struct SparseSymbolicFactorOptions
     reportError::Ptr{Cvoid} # arg: Cstring, assuming null-terminated.
 end
 
-mutable struct DenseVector{T<:vTypes}
+struct DenseVector{T<:vTypes}
     count::Cint
     data::Ptr{T}
 end
@@ -102,7 +103,7 @@ struct SparseMatrix{T<:vTypes}
     data::Ptr{T}
 end
 
-mutable struct DenseMatrix{T<:vTypes}
+struct DenseMatrix{T<:vTypes}
     rowCount::Cint
     columnCount::Cint
     columnStride::Cint
@@ -127,7 +128,7 @@ end
 # const SymbolicFactor = SparseOpaqueSymbolicFactorization
 
 # TODO: I have T here to match the C: _Double, _Float variants. But T isn't used!!
-mutable struct SparseOpaqueFactorization{T<:vTypes}
+struct SparseOpaqueFactorization{T<:vTypes}
     status::SparseStatus_t
     attributes::att_type
     symbolicFactorization::SparseOpaqueSymbolicFactorization
@@ -142,94 +143,61 @@ end
 
 const LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libSparse.dylib"
 
-#=function Base.cconvert(::Type{SparseMatrix{T}}, jl::SparseMatrixCSC{T, Int64}) where T<:vTypes
-    println("in cconvert")
-    sleep(2)
-    reindexedCols = Clong.(jl.colptr .+ -1)
-    reindexedRows = Cint.(jl.rowval .+ -1)
-    return (jl, SparseMatrix{T}(
-        SparseMatrixStructure(jl.m, jl.n, pointer(reindexedCols), pointer(reindexedRows), ATT_ORDINARY, 1),
-        C_NULL
-    ), reindexedCols, reindexedRows)
-end
-
-function Base.unsafe_convert(::Type{SparseMatrix{T}}, tup::Tuple{SparseMatrixCSC{T}, SparseMatrix{T},
-                                                                Vector{Clong}, Vector{Cint}}) where T<:vTypes
-    println("in unsafe_convert")
-    sleep(2)
-    jl, apple, c, r = tup
-    # I think it's failing because this is a new allocation, when
-    # "all allocations of memory that will be accessed by the C code"
-    # should be performed inside cconvert.
-    # I could get around this by allocating empty buffers of the correct size
-    # (Ref's to buffers of undefs?) then fill them here
-    apple.structure = SparseMatrixStructure(jl.m, jl.n,
-                                pointer(c), pointer(r),
-                                ATT_ORDINARY, 1)
-    apple.data = pointer(jl.nzval)
-    return apple
-end=#
-
+# WARNING: enclose the ccall in a GC.@preserve, otherwise this is unsafe.
 function Base.cconvert(::Type{DenseMatrix{T}}, m::Matrix{T}) where T<:vTypes
     rowCount, colCount = size(m)
-    dm = DenseMatrix{T}(rowCount, colCount, rowCount, ATT_ORDINARY, C_NULL)
-    return (m, dm)
-end
-
-function Base.unsafe_convert(::Type{DenseMatrix{T}}, tup::Tuple{Matrix{T}, DenseMatrix{T}}) where T<:vTypes
-    m, dm = tup
-    dm.data = pointer(m)
-    return dm
+    return DenseMatrix{T}(rowCount, colCount, rowCount, ATT_ORDINARY, pointer(m))
 end
 
 function Base.cconvert(::Type{DenseVector{T}}, v::Vector{T}) where T<:vTypes
-    return (v, DenseVector{T}(size(v)[1], C_NULL))
-end
-
-function Base.unsafe_convert(::Type{DenseVector{T}}, tup::Tuple{Vector{T}, DenseVector{T}}) where T<:vTypes
-    v, a = tup
-    a.data = pointer(v)
-    return a
+    return DenseVector{T}(size(v)[1], pointer(v))
 end
 
 for T in (Cfloat, Cdouble)
     # TODO: simpler way that doesn't require @eval?
     # also, if I could write "dense vector-or-matrix," that'd cut the redundancy in half.
-    # TODO: find a way to avoid copy-pasting Union{DenseMatrix{$T},Matrix{$T}} over and over.
-    # (Maybe I could just simplify the interface and only call with DenseMatrix{$T} now
-    # that things are working.)
     local dmMultMangled = T == Cfloat ? :_Z14SparseMultiply18SparseMatrix_Float17DenseMatrix_FloatS0_ :
                         :_Z14SparseMultiply19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
-        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::Union{DenseMatrix{$T},Matrix{$T}},
-                                                            arg3::Union{DenseMatrix{$T},Matrix{$T}})
+        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
+                                                            arg3::DenseMatrix{$T})
             @ccall LIBSPARSE.$dmMultMangled(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
                                                 arg3::DenseMatrix{$T})::Cvoid
         end
     end
 
-    #=@eval begin
-        function SparseMultiply(arg1::SparseMatrixCSC{$T}, arg2::Matrix{$T}, arg3::Matrix{$T})
-            @ccall LIBSPARSE.$dmMultMangled(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
+    @eval begin
+        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::Matrix{$T},
+                                                            arg3::Matrix{$T})
+            GC.@preserve arg2 arg3 @ccall LIBSPARSE.$dmMultMangled(arg1::SparseMatrix{$T},
+                                                arg2::DenseMatrix{$T},
                                                 arg3::DenseMatrix{$T})::Cvoid
         end
-    end=#
+    end
 
     local dvMultMangled = T == Cfloat ? :_Z14SparseMultiply18SparseMatrix_Float17DenseVector_FloatS0_ :
                         :_Z14SparseMultiply19SparseMatrix_Double18DenseVector_DoubleS0_
     @eval begin
-        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::Union{DenseVector{$T},Vector{$T}},
-                                                        arg3::Union{DenseVector{$T},Vector{$T}})
+        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
+                                                        arg3::DenseVector{$T})
             @ccall LIBSPARSE.$dvMultMangled(arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
                                             arg3::DenseVector{$T})::Cvoid
         end
     end
 
+    @eval SparseMultiply(arg1::SparseMatrix{$T},
+                        arg2::Vector{$T},
+                        arg3::Vector{$T}) = GC.@preserve arg2 arg3 (
+                            @ccall LIBSPARSE.$dvMultMangled(arg1::SparseMatrix{$T},
+                                                            arg2::DenseVector{$T},
+                                                            arg3::DenseVector{$T})::Cvoid
+                        )
+
     local sdmMultMangled = T == Cfloat ? :_Z14SparseMultiplyf18SparseMatrix_Float17DenseMatrix_FloatS0_ :
                                 :_Z14SparseMultiplyd19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
-        function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::Union{DenseMatrix{$T},Matrix{$T}},
-                                                    arg4::Union{DenseMatrix{$T},Matrix{$T}})
+        function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::DenseMatrix{$T},
+                                                    arg4::DenseMatrix{$T})
             @ccall LIBSPARSE.$sdmMultMangled(arg1::$T, arg2::SparseMatrix{$T},
                                                 arg3::DenseMatrix{$T}, arg4::DenseMatrix{$T})::Cvoid
         end
@@ -238,8 +206,8 @@ for T in (Cfloat, Cdouble)
     local sdvMultMangled = T == Cfloat ? :_Z14SparseMultiplyf18SparseMatrix_Float17DenseVector_FloatS0_ :
                                         :_Z14SparseMultiplyd19SparseMatrix_Double18DenseVector_DoubleS0_
     @eval begin
-        function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::Union{DenseVector{$T}, Vector{$T}},
-                                                    arg4::Union{DenseVector{$T}, Vector{$T}})
+        function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::DenseVector{$T},
+                                                    arg4::DenseVector{$T})
             @ccall LIBSPARSE.$sdvMultMangled(arg1::$T, arg2::SparseMatrix{$T},
                                                 arg3::DenseVector{$T}, arg4::DenseVector{$T})::Cvoid
         end
@@ -248,8 +216,8 @@ for T in (Cfloat, Cdouble)
     local dmMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseMatrix_FloatS0_ :
                                             :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
-        function SparseMultiplyAdd(arg1::SparseMatrix{$T}, arg2::Union{DenseMatrix{$T},Matrix{$T}},
-                                                arg3::Union{DenseMatrix{$T},Matrix{$T}})
+        function SparseMultiplyAdd(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
+                                                arg3::DenseMatrix{$T})
             @ccall LIBSPARSE.$dmMultAddMangled(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
                                                 arg3::DenseMatrix{$T})::Cvoid
         end
@@ -258,8 +226,8 @@ for T in (Cfloat, Cdouble)
     local dvMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseVector_FloatS0_ :
                                             :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseVector_DoubleS0_
     @eval begin
-        function SparseMultiplyAdd(arg1::SparseMatrix{$T}, arg2::Union{DenseVector{$T},Vector{$T}},
-                                                                arg3::Union{DenseVector{$T},Vector{$T}})
+        function SparseMultiplyAdd(arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
+                                                                arg3::DenseVector{$T})
             @ccall LIBSPARSE.$dvMultAddMangled(arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
                                                 arg3::DenseVector{$T})::Cvoid
         end
@@ -268,8 +236,8 @@ for T in (Cfloat, Cdouble)
     local sdmMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseMatrix_FloatS0_ :
                                         :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
-        function SparseMultiplyAdd(arg0::$T, arg1::SparseMatrix{$T}, arg2::Union{DenseMatrix{$T},Matrix{$T}},
-                                                                arg3::Union{DenseMatrix{$T},Matrix{$T}})
+        function SparseMultiplyAdd(arg0::$T, arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
+                                                                arg3::DenseMatrix{$T})
             @ccall LIBSPARSE.$sdmMultAddMangled(arg0::$T, arg1::SparseMatrix{$T},
                                                 arg2::DenseMatrix{$T}, arg3::DenseMatrix{$T})::Cvoid
         end
@@ -278,8 +246,8 @@ for T in (Cfloat, Cdouble)
     local sdvMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseVector_FloatS0_ :
                                         :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseVector_DoubleS0_
     @eval begin
-        function SparseMultiplyAdd(arg0::$T, arg1::SparseMatrix{$T}, arg2::Union{DenseVector{$T},Vector{$T}},
-                                                                        arg3::Union{DenseVector{$T},Vector{$T}})
+        function SparseMultiplyAdd(arg0::$T, arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
+                                                                        arg3::DenseVector{$T})
             @ccall LIBSPARSE.$sdvMultAddMangled(arg0::$T, arg1::SparseMatrix{$T},
                                                 arg2::DenseVector{$T}, arg3::DenseVector{$T})::Cvoid
         end
@@ -324,13 +292,14 @@ for T in (Cfloat, Cdouble)
     local mCleanup = T == Cfloat ? :_Z13SparseCleanup18SparseMatrix_Float :
                                      :_Z13SparseCleanup19SparseMatrix_Double
     @eval SparseCleanup(arg1::SparseMatrix{$T}) = @ccall (
-                                LIBSPARSE.$mCleanup(arg1::SparseMatrix{$T}))::Cvoid
+            LIBSPARSE.$mCleanup(arg1::SparseMatrix{$T})::Cvoid
+    )
     
     local ofCleanup = T == Cfloat ? :_Z13SparseCleanup31SparseOpaqueFactorization_Float :
                                     :_Z13SparseCleanup32SparseOpaqueFactorization_Double
     @eval SparseCleanup(arg1::SparseOpaqueFactorization{$T}) = @ccall (
-            LIBSPARSE.$ofCleanup(arg1::SparseOpaqueFactorization{$T}))::Cvoid
-    
+            LIBSPARSE.$ofCleanup(arg1::SparseOpaqueFactorization{$T})::Cvoid
+    )
     # TODO: SparseFactor, on SparseMatrix{T} and SparseMatrixStructure.
     # after those, probably do SparseRetain.
 
@@ -344,28 +313,18 @@ for T in (Cfloat, Cdouble)
     end
 
     # line 1733 in header.
-    # local sparseSolve = T == Cfloat ? :
     local sparseSolveInplace = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_Float :
                                             :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_Double
-    @eval SparseSolve(arg1::SparseOpaqueFactorization{$T}, arg2::Union{Matrix{$T}, DenseMatrix{$T}}) = @ccall (
+    @eval SparseSolve(arg1::SparseOpaqueFactorization{$T}, arg2::DenseMatrix{$T}) = @ccall (
         LIBSPARSE.$sparseSolveInplace(arg1::SparseOpaqueFactorization{$T}, arg2::DenseMatrix{$T})::Cvoid
     )
 end
 SparseCleanup(arg1::SparseOpaqueSymbolicFactorization) = @ccall (
         LIBSPARSE._Z13SparseCleanup33SparseOpaqueSymbolicFactorization(
-                                arg1::SparseOpaqueSymbolicFactorization))::Cvoid
-# If you look at SolveImplementation.h, this just calls
-# _SparseSymbolicFactorQR(type, &Matrix, &options);
+                                arg1::SparseOpaqueSymbolicFactorization)::Cvoid
+)
 SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrixStructure) = @ccall (
     LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure(
         arg1::SparseFactorization_t, arg2::SparseMatrixStructure
     )::SparseOpaqueSymbolicFactorization
-)
-# Maybe this will work better and not produce memory errors??
-# But then I need to figure out sensible defaults for the options
-SparseFactorQR(arg1::Ref{SparseMatrixStructure}, 
-                arg2::Ref{SparseSymbolicFactorOptions}) = @ccall (
-    LIBSPARSE._SparseSymbolicFactorQR(SparseFactorizationQR::SparseFactorization_t,
-                arg1::Ptr{SparseMatrixStructure},
-                arg2::Ptr{SparseSymbolicFactorOptions})::SparseOpaqueSymbolicFactorization
 )

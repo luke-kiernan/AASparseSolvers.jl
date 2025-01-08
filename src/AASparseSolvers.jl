@@ -70,37 +70,35 @@ mutable struct AASparseMatrix{T <: Union{Cfloat, Cdouble}}
     _data::Vector{T}
 end
 
+# ignore attributes for now.
 function AASparseMatrix{T}(m::Integer, n::Integer, colptr::Union{Vector{Int64}, Vector{Int32}},
                             rowval::Union{Vector{Int64}, Vector{Int32}}, nzval::Vector{T}) where T <: Union{Cfloat, Cdouble}
     c = Clong.(colptr .+ -1)
     r = Cint.(rowval .+ -1)
     s = SparseMatrixStructure(m, n, pointer(c), pointer(r), ATT_ORDINARY, 1)
     m = SparseMatrix{T}(s, pointer(nzval))
-    obj = AASparseMatrix{T}(m, c, r, nzval)
-    @assert(obj.aa_matrix.data == pointer(obj._data))
-    @assert(obj.aa_matrix.structure.columnStarts == pointer(obj._col_inds))
-    @assert(obj.aa_matrix.structure.rowIndices == pointer(obj._row_inds))
-    return obj
+    AASparseMatrix{T}(m, c, r, nzval)
 end
 
-# I could also do multiplication by scalar, but there's no point in doing the ccall
-# for that one: just multiply the vector.
+mutable struct AADenseMatrix{T <: Union{Cfloat, Cdouble}}
+    aa_matrix::DenseMatrix{T}
+    _data::Vector{T}
+end
 
-# keeping this around for troubleshooting reasons.
-#=function mult(A::AASparseMatrix{T}, x::S, y::S) where S<:Union{Matrix{T},Vector{T}} where T <:AASparseSolvers.vTypes
-    @assert size(x)[1] == A.aa_matrix.structure.columnCount
-    @assert size(y)[1] == A.aa_matrix.structure.rowCount
-    display(y)
-    sleep(2)
-    if length(size(x)) == 2
-        @assert size(y)[2] == size(x)[2]
-    end
-    # this C call also goes awry. so allocating y inside the function doesn't seem to be the problem.
-    a, b, c = A._col_inds, A._row_inds, A._data
-    GC.@preserve a b c SparseMultiply(A.aa_matrix, x, y) # only passing a reference, not the object
-    return nothing
-end=#
-function Base.:(*)(A::AASparseMatrix{T}, x::Union{Matrix{T},Vector{T}}) where T<:AASparseSolvers.vTypes
+function AADenseMatrix{T}(m::Integer, n::Integer, data::Vector{T}) where T <: Union{Cfloat, Cdouble}
+    AADenseMatrix{T}(DenseMatrix{T}(m, n, n, ATT_ORDINARY, pointer(data)), data)
+end
+
+mutable struct AADenseVector{T <: Union{Cfloat, Cdouble}}
+    aa_vector::DenseVector{T}
+    _data::Vector{T}
+end
+
+function AADenseVector{T}(m::Integer, data::Vector{T}) where T<:Union{Cfloat, Cdouble}
+    AADenseVector{T}(DenseVector{T}(m, pointer(data)), data)
+end
+
+#= function Base.:(*)(A::AASparseMatrix{T}, x::Union{Matrix{T},Vector{T}}) where T<:AASparseSolvers.vTypes
     @assert size(x)[1] == A.aa_matrix.structure.columnCount
     y = Array{T}(undef, A.aa_matrix.structure.rowCount, size(x)[2:end]...)
     if length(size(x)) == 2
@@ -108,7 +106,7 @@ function Base.:(*)(A::AASparseMatrix{T}, x::Union{Matrix{T},Vector{T}}) where T<
     end
     SparseMultiply(A.aa_matrix, x, y)
     return y
-end
-export AASparseMatrix
+end=#
+export AASparseMatrix, AADenseMatrix, AADenseVector
 
 end # module AASparseSolvers
