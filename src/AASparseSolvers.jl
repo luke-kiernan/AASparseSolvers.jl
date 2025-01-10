@@ -1,5 +1,5 @@
 module AASparseSolvers
-
+using LinearAlgebra
 include("wrappers.jl")
 
 # utility function mostly for testing.
@@ -60,45 +60,38 @@ function DenseToMatrix(A::DenseMatrix{T}) where T <: vTypes
     return B
 end
 
-# do I need this to be mutable?
-mutable struct AASparseMatrix{T <: Union{Cfloat, Cdouble}}
+mutable struct AAFactorization{T<:vTypes}
     aa_matrix::SparseMatrix{T}
     # these don't *quite* match SparseArrayCSC fields: 1 vs 0 indexing,
     # Cint vs Clong for row indices.
     _col_inds::Vector{Clong}
     _row_inds::Vector{Cint}
     _data::Vector{T}
+    _factorization::Union{Nothing, SparseOpaqueFactorization}
 end
 
-# ignore attributes for now.
-function AASparseMatrix{T}(m::Integer, n::Integer, colptr::Union{Vector{Int64}, Vector{Int32}},
-                            rowval::Union{Vector{Int64}, Vector{Int32}}, nzval::Vector{T}) where T <: Union{Cfloat, Cdouble}
-    c = Clong.(colptr .+ -1)
-    r = Cint.(rowval .+ -1)
-    s = SparseMatrixStructure(m, n, pointer(c), pointer(r), ATT_ORDINARY, 1)
-    m = SparseMatrix{T}(s, pointer(nzval))
-    AASparseMatrix{T}(m, c, r, nzval)
+function AAFactorization(sparseM::SparseMatrixCSC{T, Int64})  where T<:vTypes
+    if size(sparseM,1) == size(sparseM, 2) && isapprox(det(sparseM), 0)
+        println("WARNING: matrix is singular! Calls to solve will error.")
+    end
+    c = Clong.(sparseM.colptr .+ -1)
+    r = Cint.(sparseM.rowval .+ -1)
+    vals = copy(sparseM.nzval)
+    s = SparseMatrixStructure(size(sparseM)..., pointer(c), pointer(r), ATT_ORDINARY, 1)
+    obj = AAFactorization(
+        SparseMatrix(s, pointer(vals)),
+        c, r, vals,
+        nothing
+    )
+    function cleanup(aa_fact)
+        if !isnothing(aa_fact._factorization)
+            AASparseSolvers.SparseCleanup(aa_fact._factorization)
+        end
+    end
+    return finalizer(cleanup, obj)
 end
 
-mutable struct AADenseMatrix{T <: Union{Cfloat, Cdouble}}
-    aa_matrix::DenseMatrix{T}
-    _data::Vector{T}
-end
-
-function AADenseMatrix{T}(m::Integer, n::Integer, data::Vector{T}) where T <: Union{Cfloat, Cdouble}
-    AADenseMatrix{T}(DenseMatrix{T}(m, n, n, ATT_ORDINARY, pointer(data)), data)
-end
-
-mutable struct AADenseVector{T <: Union{Cfloat, Cdouble}}
-    aa_vector::DenseVector{T}
-    _data::Vector{T}
-end
-
-function AADenseVector{T}(m::Integer, data::Vector{T}) where T<:Union{Cfloat, Cdouble}
-    AADenseVector{T}(DenseVector{T}(m, pointer(data)), data)
-end
-
-#= function Base.:(*)(A::AASparseMatrix{T}, x::Union{Matrix{T},Vector{T}}) where T<:AASparseSolvers.vTypes
+function Base.:(*)(A::AAFactorization{T}, x::Union{Matrix{T},Vector{T}}) where T<:vTypes
     @assert size(x)[1] == A.aa_matrix.structure.columnCount
     y = Array{T}(undef, A.aa_matrix.structure.rowCount, size(x)[2:end]...)
     if length(size(x)) == 2
@@ -106,7 +99,30 @@ end
     end
     SparseMultiply(A.aa_matrix, x, y)
     return y
-end=#
-export AASparseMatrix, AADenseMatrix, AADenseVector
+end
+
+function factor!(aa_fact::AAFactorization{T})  where T<:vTypes
+    if isnothing(aa_fact._factorization)
+        aa_fact._factorization = AASparseSolvers.SparseFactor(AASparseSolvers.SparseFactorizationQR, aa_fact.aa_matrix)
+    end
+end
+
+function solve(aa_fact::AAFactorization{T}, b::Union{Matrix{T}, Vector{T}}) where T<:vTypes
+    # I have yet to implement the ccall for the vector one.
+    @assert aa_fact.aa_matrix.structure.columnCount == size(b, 1)
+    factor!(aa_fact)
+    x = Array{T}(undef, aa_fact.aa_matrix.structure.columnCount, size(b)[2:end]...)
+    AASparseSolvers.SparseSolve(aa_fact._factorization, b, x)
+    return x
+end
+
+function solve!(aa_fact::AAFactorization{T}, b::Union{Matrix{T}, Vector{T}}) where T<:vTypes
+    @assert aa_fact.aa_matrix.structure.rowCount == aa_fact.aa_matrix.structure.columnCount "Buffer sizes different"
+    factor!(aa_fact)
+    AASparseSolvers.SparseSolve(aa_fact._factorization, b)
+    return b
+end
+
+export AAFactorization, solve
 
 end # module AASparseSolvers

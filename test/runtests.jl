@@ -1,7 +1,7 @@
 using Test
+using LinearAlgebra
 using AASparseSolvers
 using SparseArrays
-using Profile
 
 # https://developer.apple.com/documentation/accelerate/creating_sparse_matrices?language=objc
 @testset "SparseToMatrix" begin
@@ -151,22 +151,33 @@ end
     @test res ≈ A*x
 end=#
 
-# this gives memory errors (sometimes)
-#= @testset "AASparseMatrix constructor and *" begin
+@testset "AAFactorization *" begin
     for T in (Float32, Float64)
         @eval begin
             jlA = sprand($T, 3, 3, 0.5)
-            x = rand($T, 3)
-            p1 = jlA.colptr
-            p2 = jlA.rowval
-            p3 = jlA.nzval
-            aaA = AASparseMatrix{$T}(jlA.m, jlA.n, p1, p2, p3)
-            GC.@preserve x p1 p2 p3 jlA aaA begin
-                @test aaA * x ≈ Array(jlA) * x
-            end
+            x = rand($T, 3, 3)
+            aaA = AAFactorization(jlA)
+            @test aaA * x ≈ Array(jlA) * x
         end
     end
-end=#
+end
+
+@testset "AAFactorization solve" begin
+    for T in (Float32, Float64)
+        @eval begin
+            N = 3
+            jlA = sprand($T, N, N, 0.5)
+            while det(jlA) ≈ 0
+                global jlA = sprand($T, N, N, 0.5)
+            end
+            test_fact = AAFactorization(jlA)
+            B = rand($T, N, N)
+            @test solve(test_fact, B) ≈ Array(jlA) \ B
+            b = rand($T, N)
+            @test solve(test_fact, b) ≈ Array(jlA) \ b
+        end
+    end
+end
 
 # transpose doesn't actually change the matrix:
 # just creates new matrix whose structure has the opposite transpose flag.
@@ -195,12 +206,34 @@ end=#
     end
 end
 
-# This gives memory errors (usually)
+#=
+@testset "ccall sparsefactor symbolic on singular" begin
+    for i in 0:1
+        sparseM = sprand(4, 4, 0.5)
+        while i == 0 ? (det(sparseM) != 0) : (det(sparseM) == 0)
+            sparseM = sprand(4, 4, 0.5)
+        end
+        println(det(sparseM))
+        col_inds = Clong.(sparseM.colptr .+ -1)
+        row_inds = Cint.(sparseM.rowval .+ -1)
+        qrType = AASparseSolvers.SparseFactorizationQR
+        GC.@preserve col_inds row_inds begin
+            s = AASparseSolvers.SparseMatrixStructure(4, 4,
+                pointer(col_inds), pointer(row_inds),
+                AASparseSolvers.ATT_ORDINARY, 1)
+            sf = AASparseSolvers.SparseFactor(qrType, s)
+            println(sf.status)
+        end
+    end
+end=#
 
-@testset "ccall sparsefactor " begin
+@testset "ccall sparsefactor" begin
     for T in (Float32, Float64)
         @eval begin
             sparseM = sprand($T, 4, 4, 0.5)
+            while det(sparseM) == 0
+                global sparseM = sprand($T, 4, 4, 0.5)
+            end
             sparse_data = copy(sparseM.nzval)
             col_inds = Clong.(sparseM.colptr .+ -1)
             row_inds = Cint.(sparseM.rowval .+ -1)
@@ -216,11 +249,13 @@ end
                     4, 4, 4, AASparseSolvers.ATT_ORDINARY, pointer(B)
                 )
                 qrType = AASparseSolvers.SparseFactorizationQR
+                sf = AASparseSolvers.SparseFactor(qrType, s)
+                @test sf.status == AASparseSolvers.SparseStatusOk
                 f = AASparseSolvers.SparseFactor(qrType, sparse_matrix)
                 AASparseSolvers.SparseSolve(f, dense_matrix)
                 @test B ≈ expected
-                # not sure if the memory is Julia-managed or C-managed.
-                # AASparseSolvers.SparseCleanup(sf)
+                AASparseSolvers.SparseCleanup(f)
+                AASparseSolvers.SparseCleanup(sf)
             end
         end
     end
