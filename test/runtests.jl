@@ -206,26 +206,25 @@ end
     end
 end
 
-#=
 @testset "ccall sparsefactor symbolic on singular" begin
-    for i in 0:1
-        sparseM = sprand(4, 4, 0.5)
-        while i == 0 ? (det(sparseM) != 0) : (det(sparseM) == 0)
-            sparseM = sprand(4, 4, 0.5)
+    sparseM = sprand(4, 4, 0.1)
+    @assert det(sparseM) == 0
+    col_inds = Clong.(sparseM.colptr .+ -1)
+    row_inds = Cint.(sparseM.rowval .+ -1)
+    qrType = AASparseSolvers.SparseFactorizationQR
+    GC.@preserve col_inds row_inds begin
+        err = nothing
+        s = AASparseSolvers.SparseMatrixStructure(4, 4,
+            pointer(col_inds), pointer(row_inds),
+            AASparseSolvers.ATT_ORDINARY, 1)
+        try
+            sf = AASparseSolvers.SparseFactorWithWarnings(qrType, s)
+        catch err
         end
-        println(det(sparseM))
-        col_inds = Clong.(sparseM.colptr .+ -1)
-        row_inds = Cint.(sparseM.rowval .+ -1)
-        qrType = AASparseSolvers.SparseFactorizationQR
-        GC.@preserve col_inds row_inds begin
-            s = AASparseSolvers.SparseMatrixStructure(4, 4,
-                pointer(col_inds), pointer(row_inds),
-                AASparseSolvers.ATT_ORDINARY, 1)
-            sf = AASparseSolvers.SparseFactor(qrType, s)
-            println(sf.status)
-        end
+        @test err isa Exception
+        @test sprint(showerror, err) == "Matrix is structurally singular\n"
     end
-end=#
+end
 
 @testset "ccall sparsefactor" begin
     for T in (Float32, Float64)

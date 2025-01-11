@@ -103,11 +103,6 @@ struct SparseSymbolicFactorOptions
     reportError::Ptr{Cvoid} # arg: Cstring, assuming null-terminated.
 end
 
-# attempt at error handling (see above about nil vs C_NULL)
-#=
-CError(text::Cstring)::Cvoid = error(unsafe_string(text))
-CErrorPtr = @cfunction(CError, Cvoid, (Cstring, ))
-=#
 
 struct DenseVector{T<:vTypes}
     count::Cint
@@ -352,15 +347,23 @@ SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrixStructure) = @ccall 
     )::SparseOpaqueSymbolicFactorization
 )
 
-# attempt at error handling (see above about nil vs C_NULL)
-#= SparseFactor(arg1::SparseFactorization_t,
+SparseFactorWithWarnings(arg1::SparseFactorization_t,
             arg2::SparseMatrixStructure) = SparseFactor(
-                arg1, arg2, CErrorPtr)
+                arg1, arg2, 
+                SparseSymbolicFactorOptions(SparseDefaultControl,
+                SparseOrderDefault, C_NULL, C_NULL,
+                @cfunction(Libc.malloc, Ptr{Cvoid}, (Csize_t,)),
+                @cfunction(Libc.free, Cvoid, (Ptr{Cvoid},)),
+                @cfunction(text->error(unsafe_string(text)), Cvoid, (Cstring, ))
+                )
+            )
 
-SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrixStructure,
+SparseFactor(arg1::SparseFactorization_t,
+            arg2::SparseMatrixStructure,
             arg3::SparseSymbolicFactorOptions) = @ccall(
      LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure27SparseSymbolicFactorOptions(
-        arg1::Cuint, arg2::SparseMatrixStructure,
-            arg3::SparseSymbolicFactorOptions
+                arg1::Cuint,
+                arg2::SparseMatrixStructure,
+                arg3::SparseSymbolicFactorOptions
     )::SparseOpaqueSymbolicFactorization
-) =#
+)
