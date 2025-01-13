@@ -103,6 +103,15 @@ struct SparseSymbolicFactorOptions
     reportError::Ptr{Cvoid} # arg: Cstring, assuming null-terminated.
 end
 
+SparseSymbolicFactorOptions() = SparseSymbolicFactorOptions(
+    SparseDefaultControl,
+    SparseOrderDefault,
+    C_NULL,
+    C_NULL,
+    @cfunction(Libc.malloc, Ptr{Cvoid}, (Csize_t,)),
+    @cfunction(Libc.free, Cvoid, (Ptr{Cvoid},)),
+    @cfunction(text->error(unsafe_string(text)), Cvoid, (Cstring, ))
+)
 
 struct DenseVector{T<:vTypes}
     count::Cint
@@ -341,22 +350,21 @@ SparseCleanup(arg1::SparseOpaqueSymbolicFactorization) = @ccall (
         LIBSPARSE._Z13SparseCleanup33SparseOpaqueSymbolicFactorization(
                                 arg1::SparseOpaqueSymbolicFactorization)::Cvoid
 )
-SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrixStructure) = @ccall (
+
+function SparseFactor(arg1::SparseFactorization_t,
+        arg2::SparseMatrixStructure,
+        noErrors::Bool = false)
+    noErrors ? SparseFactorNoErrors(arg1, arg2) :
+            SparseFactor(arg1, arg2, SparseSymbolicFactorOptions())
+end
+
+# keep just in case libSparse's default malloc/free cooperate better
+# with the library code (due to being from Objective-C, not from C)
+SparseFactorNoErrors(arg1::SparseFactorization_t, arg2::SparseMatrixStructure) = @ccall (
     LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure(
         arg1::SparseFactorization_t, arg2::SparseMatrixStructure
     )::SparseOpaqueSymbolicFactorization
 )
-
-SparseFactorWithWarnings(arg1::SparseFactorization_t,
-            arg2::SparseMatrixStructure) = SparseFactor(
-                arg1, arg2, 
-                SparseSymbolicFactorOptions(SparseDefaultControl,
-                SparseOrderDefault, C_NULL, C_NULL,
-                @cfunction(Libc.malloc, Ptr{Cvoid}, (Csize_t,)),
-                @cfunction(Libc.free, Cvoid, (Ptr{Cvoid},)),
-                @cfunction(text->error(unsafe_string(text)), Cvoid, (Cstring, ))
-                )
-            )
 
 SparseFactor(arg1::SparseFactorization_t,
             arg2::SparseMatrixStructure,

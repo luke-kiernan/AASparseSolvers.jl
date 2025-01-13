@@ -218,7 +218,7 @@ end
             pointer(col_inds), pointer(row_inds),
             AASparseSolvers.ATT_ORDINARY, 1)
         try
-            sf = AASparseSolvers.SparseFactorWithWarnings(qrType, s)
+            sf = AASparseSolvers.SparseFactor(qrType, s)
         catch err
         end
         @test err isa Exception

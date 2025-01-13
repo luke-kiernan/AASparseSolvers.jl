@@ -71,9 +71,6 @@ mutable struct AAFactorization{T<:vTypes}
 end
 
 function AAFactorization(sparseM::SparseMatrixCSC{T, Int64})  where T<:vTypes
-    if size(sparseM,1) == size(sparseM, 2) && isapprox(det(sparseM), 0)
-        println("WARNING: matrix is singular! Calls to solve will error.")
-    end
     c = Clong.(sparseM.colptr .+ -1)
     r = Cint.(sparseM.rowval .+ -1)
     vals = copy(sparseM.nzval)
@@ -108,7 +105,6 @@ function factor!(aa_fact::AAFactorization{T})  where T<:vTypes
 end
 
 function solve(aa_fact::AAFactorization{T}, b::Union{Matrix{T}, Vector{T}}) where T<:vTypes
-    # I have yet to implement the ccall for the vector one.
     @assert aa_fact.aa_matrix.structure.columnCount == size(b, 1)
     factor!(aa_fact)
     x = Array{T}(undef, aa_fact.aa_matrix.structure.columnCount, size(b)[2:end]...)
