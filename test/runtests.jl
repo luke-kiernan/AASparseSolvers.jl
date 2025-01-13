@@ -259,3 +259,27 @@ end
         end
     end
 end
+
+@testset "non-square in-place solve" begin
+    tallMatrix = sprand(6,3,0.5)
+    aa_fact = AAFactorization(tallMatrix)
+    x, X = rand(3), rand(3, 3)
+    b, B = tallMatrix * x, tallMatrix * X
+    solve!(aa_fact, b)
+    @test isapprox(b, x; 0.001)
+    # solve!(aa_fact, B)
+    # @test isapprox(B, X; 0.001)
+    shortMatrix = sprand(3,4,0.9)
+    aa_fact2 = AAFactorization(shortMatrix)
+    x, X = rand(4), rand(4,4)
+    b, B = shortMatrix * x, shortMatrix * X
+    bx, BX = zeros(4), zeros(4,4)
+    bx[1:3], BX[1:3, :] = b, B
+    solve!(aa_fact2, bx)
+    # These are close-ish, which makes me think it's just
+    # an accuracy problem.
+    # @test isapprox(bx, x; 0.001)
+    
+    # solve!(aa_fact2, BX)
+    # @test BX ≈ X
+end

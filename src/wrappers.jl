@@ -91,6 +91,14 @@ struct SparseNumericFactorOptions
     zeroTolerance::Float64
 end
 
+SparseNumericFactorOptions() = SparseNumericFactorOptions(
+    SparseDefaultControl,
+    SpraseScalingDefault,
+    C_NULL,
+    0.1, # these only matter for symmetric anyway.
+    eps(Float32)
+)
+
 # Note: to use system defaults, values of malloc/free should be
 # nil, which is *not the same* as C_NULL.
 struct SparseSymbolicFactorOptions
@@ -122,7 +130,7 @@ struct SparseMatrix{T<:vTypes}
     structure::SparseMatrixStructure
     data::Ptr{T}
 end
-
+# I could make this a subclass of StridedMatrix.
 struct DenseMatrix{T<:vTypes}
     rowCount::Cint
     columnCount::Cint
@@ -163,27 +171,29 @@ end
 
 const LIBSPARSE = "/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/libSparse.dylib"
 
-Base.cconvert(::Type{DenseMatrix{T}}, m::Matrix{T}) where T<:vTypes = m
+Base.cconvert(::Type{DenseMatrix{T}}, m::StridedMatrix{T}) where T<:vTypes = m
 
-function Base.unsafe_convert(::Type{DenseMatrix{T}}, m::Matrix{T}) where T<:vTypes
-    return DenseMatrix{T}(size(m)..., size(m, 1), ATT_ORDINARY, pointer(m))
+function Base.unsafe_convert(::Type{DenseMatrix{T}}, m::StridedMatrix{T}) where T<:vTypes
+    @assert stride(m, 1) == 1
+    return DenseMatrix{T}(size(m)..., stride(m, 2), ATT_ORDINARY, pointer(m))
 end
 
-Base.cconvert(::Type{DenseVector{T}}, v::Vector{T}) where T<:vTypes = v
+Base.cconvert(::Type{DenseVector{T}}, v::StridedVector{T}) where T<:vTypes = v
 
-function Base.unsafe_convert(::Type{DenseVector{T}}, v::Vector{T}) where T<:vTypes
+function Base.unsafe_convert(::Type{DenseVector{T}}, v::StridedVector{T}) where T<:vTypes
+    @assert stride(v, 1) == 1
     return DenseVector{T}(size(v)[1], pointer(v))
 end
 
 for T in (Cfloat, Cdouble)
     # TODO: simpler way that doesn't require @eval?
     # also, if I could write "dense vector-or-matrix," that'd cut the redundancy in half.
-    # TODO: would be nice to find a way to avoid copy-pasting Union{DenseMatrix{$T}, Matrix{$T}}. 
+    # TODO: would be nice to find a way to avoid copy-pasting Union{DenseMatrix{$T}, StridedMatrix{$T}}. 
     local dmMultMangled = T == Cfloat ? :_Z14SparseMultiply18SparseMatrix_Float17DenseMatrix_FloatS0_ :
                         :_Z14SparseMultiply19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
-        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::Union{DenseMatrix{$T}, Matrix{$T}},
-                                                            arg3::Union{DenseMatrix{$T}, Matrix{$T}})
+        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::Union{DenseMatrix{$T}, StridedMatrix{$T}},
+                                                            arg3::Union{DenseMatrix{$T}, StridedMatrix{$T}})
             @ccall LIBSPARSE.$dmMultMangled(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
                                                 arg3::DenseMatrix{$T})::Cvoid
         end
@@ -192,8 +202,8 @@ for T in (Cfloat, Cdouble)
     local dvMultMangled = T == Cfloat ? :_Z14SparseMultiply18SparseMatrix_Float17DenseVector_FloatS0_ :
                         :_Z14SparseMultiply19SparseMatrix_Double18DenseVector_DoubleS0_
     @eval begin
-        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::Union{DenseVector{$T}, Vector{$T}},
-                                                        arg3::Union{DenseVector{$T}, Vector{$T}})
+        function SparseMultiply(arg1::SparseMatrix{$T}, arg2::Union{DenseVector{$T}, StridedVector{$T}},
+                                                        arg3::Union{DenseVector{$T}, StridedVector{$T}})
             @ccall LIBSPARSE.$dvMultMangled(arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
                                             arg3::DenseVector{$T})::Cvoid
         end
@@ -202,8 +212,8 @@ for T in (Cfloat, Cdouble)
     local sdmMultMangled = T == Cfloat ? :_Z14SparseMultiplyf18SparseMatrix_Float17DenseMatrix_FloatS0_ :
                                 :_Z14SparseMultiplyd19SparseMatrix_Double18DenseMatrix_DoubleS0_
     @eval begin
-        function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::Union{DenseMatrix{$T}, Matrix{$T}},
-                                                    arg4::Union{DenseMatrix{$T}, Matrix{$T}})
+        function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::Union{DenseMatrix{$T}, StridedMatrix{$T}},
+                                                    arg4::Union{DenseMatrix{$T}, StridedMatrix{$T}})
             @ccall LIBSPARSE.$sdmMultMangled(arg1::$T, arg2::SparseMatrix{$T},
                                                 arg3::DenseMatrix{$T}, arg4::DenseMatrix{$T})::Cvoid
         end
@@ -211,69 +221,72 @@ for T in (Cfloat, Cdouble)
 
     local sdvMultMangled = T == Cfloat ? :_Z14SparseMultiplyf18SparseMatrix_Float17DenseVector_FloatS0_ :
                                         :_Z14SparseMultiplyd19SparseMatrix_Double18DenseVector_DoubleS0_
-    @eval begin
-        function SparseMultiply(arg1::$T, arg2::SparseMatrix{$T}, arg3::Union{DenseVector{$T}, Vector{$T}},
-                                                    arg4::Union{DenseVector{$T}, Vector{$T}})
-            @ccall LIBSPARSE.$sdvMultMangled(arg1::$T, arg2::SparseMatrix{$T},
-                                                arg3::DenseVector{$T}, arg4::DenseVector{$T})::Cvoid
-        end
-    end
+    @eval SparseMultiply(arg1::$T,
+                        arg2::SparseMatrix{$T},
+                        arg3::Union{DenseVector{$T}, StridedVector{$T}},
+                        arg4::Union{DenseVector{$T}, StridedVector{$T}}) = @ccall (
+            LIBSPARSE.$sdvMultMangled(arg1::$T,
+                                    arg2::SparseMatrix{$T},
+                                    arg3::DenseVector{$T},
+                                    arg4::DenseVector{$T})::Cvoid
+        )
 
     local dmMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseMatrix_FloatS0_ :
                                             :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseMatrix_DoubleS0_
-    @eval begin
-        function SparseMultiplyAdd(arg1::SparseMatrix{$T}, arg2::Union{DenseMatrix{$T}, Matrix{$T}},
-                                                arg3::Union{DenseMatrix{$T}, Matrix{$T}})
-            @ccall LIBSPARSE.$dmMultAddMangled(arg1::SparseMatrix{$T}, arg2::DenseMatrix{$T},
-                                                arg3::DenseMatrix{$T})::Cvoid
-        end
-    end
+    @eval SparseMultiplyAdd(arg1::SparseMatrix{$T},
+                            arg2::Union{DenseMatrix{$T}, StridedMatrix{$T}},
+                            arg3::Union{DenseMatrix{$T}, StridedMatrix{$T}}) = @ccall (
+            LIBSPARSE.$dmMultAddMangled(arg1::SparseMatrix{$T},
+                                        arg2::DenseMatrix{$T},
+                                        arg3::DenseMatrix{$T})::Cvoid
+        )
 
     local dvMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAdd18SparseMatrix_Float17DenseVector_FloatS0_ :
                                             :_Z17SparseMultiplyAdd19SparseMatrix_Double18DenseVector_DoubleS0_
-    @eval begin
-        function SparseMultiplyAdd(arg1::SparseMatrix{$T}, arg2::Union{DenseVector{$T}, Vector{$T}},
-                                                                arg3::Union{DenseVector{$T}, Vector{$T}})
-            @ccall LIBSPARSE.$dvMultAddMangled(arg1::SparseMatrix{$T}, arg2::DenseVector{$T},
-                                                arg3::DenseVector{$T})::Cvoid
-        end
-    end
+    @eval SparseMultiplyAdd(arg1::SparseMatrix{$T},
+                            arg2::Union{DenseVector{$T}, StridedVector{$T}},
+                            arg3::Union{DenseVector{$T}, StridedVector{$T}}) = @ccall(
+            LIBSPARSE.$dvMultAddMangled(arg1::SparseMatrix{$T},
+                                        arg2::DenseVector{$T},
+                                        arg3::DenseVector{$T})::Cvoid
+        )
 
     local sdmMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseMatrix_FloatS0_ :
                                         :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseMatrix_DoubleS0_
-    @eval begin
-        function SparseMultiplyAdd(arg0::$T, arg1::SparseMatrix{$T}, arg2::Union{DenseMatrix{$T}, Matrix{$T}},
-                                                                arg3::Union{DenseMatrix{$T}, Matrix{$T}})
-            @ccall LIBSPARSE.$sdmMultAddMangled(arg0::$T, arg1::SparseMatrix{$T},
-                                                arg2::DenseMatrix{$T}, arg3::DenseMatrix{$T})::Cvoid
-        end
-    end
+    @eval SparseMultiplyAdd(arg0::$T,
+                            arg1::SparseMatrix{$T},
+                            arg2::Union{DenseMatrix{$T}, StridedMatrix{$T}},
+                            arg3::Union{DenseMatrix{$T}, StridedMatrix{$T}}) = @ccall (
+            LIBSPARSE.$sdmMultAddMangled(arg0::$T,
+                                        arg1::SparseMatrix{$T},
+                                        arg2::DenseMatrix{$T},
+                                        arg3::DenseMatrix{$T})::Cvoid
+        )
 
     local sdvMultAddMangled = T == Cfloat ? :_Z17SparseMultiplyAddf18SparseMatrix_Float17DenseVector_FloatS0_ :
                                         :_Z17SparseMultiplyAddd19SparseMatrix_Double18DenseVector_DoubleS0_
-    @eval begin
-        function SparseMultiplyAdd(arg0::$T, arg1::SparseMatrix{$T}, arg2::Union{DenseVector{$T}, Vector{$T}},
-                                                                        arg3::Union{DenseVector{$T}, Vector{$T}})
-            @ccall LIBSPARSE.$sdvMultAddMangled(arg0::$T, arg1::SparseMatrix{$T},
-                                                arg2::DenseVector{$T}, arg3::DenseVector{$T})::Cvoid
-        end
-    end
+    @eval SparseMultiplyAdd(arg0::$T,
+                            arg1::SparseMatrix{$T},
+                            arg2::Union{DenseVector{$T}, StridedVector{$T}},
+                            arg3::Union{DenseVector{$T}, StridedVector{$T}}) = @ccall (
+            LIBSPARSE.$sdvMultAddMangled(arg0::$T,
+                                        arg1::SparseMatrix{$T},
+                                        arg2::DenseVector{$T},
+                                        arg3::DenseVector{$T})::Cvoid
+        )
 
     local mTransposeMangled = T == Cfloat ? :_Z18SparseGetTranspose18SparseMatrix_Float :
                                             :_Z18SparseGetTranspose19SparseMatrix_Double
-    @eval begin
-        function SparseGetTranspose(arg1::SparseMatrix{$T})
-            @ccall LIBSPARSE.$mTransposeMangled(arg1::SparseMatrix{$T})::SparseMatrix{$T}
-        end
-    end
+    @eval SparseGetTranspose(arg1::SparseMatrix{$T}) = @ccall(
+        LIBSPARSE.$mTransposeMangled(arg1::SparseMatrix{$T})::SparseMatrix{$T}
+    )
     # skipped: 2 subfactor transposes.
     local ofTransposeMangled = T == Cfloat ? :_Z18SparseGetTranspose31SparseOpaqueFactorization_Float :
                                         :_Z18SparseGetTranspose32SparseOpaqueFactorization_Double
-    @eval begin
-        function SparseGetTranspose(arg1::SparseOpaqueFactorization{$T})
-            @ccall LIBSPARSE.$ofTransposeMangled(arg1::SparseOpaqueFactorization{$T})::SparseOpaqueFactorization{$T}
-        end
-    end
+    @eval SparseGetTranspose(arg1::SparseOpaqueFactorization{$T}) = @ccall (
+            LIBSPARSE.$ofTransposeMangled(arg1::SparseOpaqueFactorization{$T})::SparseOpaqueFactorization{$T}
+    )
+
     # TODO: these SparseConvertFromCoord functions are untested.
     local convertCoordMangled = T == Cfloat ? :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKf :
                                             :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKd
@@ -307,45 +320,80 @@ for T in (Cfloat, Cdouble)
             LIBSPARSE.$ofCleanup(arg1::SparseOpaqueFactorization{$T})::Cvoid
     )
 
+    @eval SparseFactor(arg1::SparseFactorization_t,
+                        arg2::SparseMatrix{$T},
+                        noErrors::Bool = false) = 
+                noErrors ? SparseFactor(arg1, arg2) :
+                SparseFactor(arg1, arg2, SparseSymbolicFactorOptions(), SparseNumericFactorOptions()) 
+
     local sparseFactorMatrix = T == Cfloat ? :_Z12SparseFactorh18SparseMatrix_Float :
                                                 :_Z12SparseFactorh19SparseMatrix_Double
-    @eval begin
-        function SparseFactor(arg1::SparseFactorization_t, arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
-            @ccall LIBSPARSE.$sparseFactorMatrix(arg1::SparseFactorization_t, arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
-        end
-    end
+    @eval SparseFactorNoErrors(arg1::SparseFactorization_t,
+                                arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T} = @ccall(
+        LIBSPARSE.$sparseFactorMatrix(arg1::SparseFactorization_t,
+                                        arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
+    )
+
+    local sparseFactorMatrixOpts = T == Cfloat ? :_Z12SparseFactorh18SparseMatrix_Float27SparseSymbolicFactorOptions26SparseNumericFactorOptions :
+                                           :_Z12SparseFactorh19SparseMatrix_Double27SparseSymbolicFactorOptions26SparseNumericFactorOptions     
+    @eval SparseFactor(arg1::SparseFactorization_t,
+                    arg2::SparseMatrix{$T},
+                    arg3::SparseSymbolicFactorOptions,
+                    arg4::SparseNumericFactorOptions) = @ccall(
+            LIBSPARSE.$sparseFactorMatrixOpts(
+                    arg1::Cuint,
+                    arg2::SparseMatrix{$T},
+                    arg3::SparseSymbolicFactorOptions,
+                    arg4::SparseNumericFactorOptions
+            )::SparseOpaqueFactorization{$T}
+        )
 
     local sparseSolveInplace = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_Float :
                                             :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_Double
-    @eval SparseSolve(arg1::SparseOpaqueFactorization{$T}, arg2::Union{DenseMatrix{$T}, Matrix{$T}}) = @ccall (
-        LIBSPARSE.$sparseSolveInplace(arg1::SparseOpaqueFactorization{$T}, arg2::DenseMatrix{$T})::Cvoid
-    )
+    @eval function SparseSolve(arg1::SparseOpaqueFactorization{$T},
+                            arg2::Union{DenseMatrix{$T}, StridedMatrix{$T}})
+        @ccall LIBSPARSE.$sparseSolveInplace(arg1::SparseOpaqueFactorization{$T},
+                                                arg2::DenseMatrix{$T})::Cvoid
+        if arg2 isa StridedMatrix
+            resize!(arg2, (arg1.symbolicFactorization.columnCount, size(arg2)[2]))
+        end
+    end
 
     local sparseSolve = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_FloatS0_ :
                                 :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_DoubleS0_
-    @eval SparseSolve(arg1::SparseOpaqueFactorization{$T}, arg2::Union{DenseMatrix{$T}, Matrix{$T}},
-                        arg3::Union{DenseMatrix{$T}, Matrix{$T}}) = @ccall (
+    @eval SparseSolve(arg1::SparseOpaqueFactorization{$T}, arg2::Union{DenseMatrix{$T}, StridedMatrix{$T}},
+                        arg3::Union{DenseMatrix{$T}, StridedMatrix{$T}}) = @ccall (
         LIBSPARSE.$sparseSolve(arg1::SparseOpaqueFactorization{$T}, arg2::DenseMatrix{$T}, 
                                     arg3::DenseMatrix{$T})::Cvoid
     )
 
     local sparseSolveVecInPlace = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseVector_Float :
                                 :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseVector_Double
-    @eval SparseSolve(arg1::SparseOpaqueFactorization{$T},
-                    arg2::Union{DenseVector{$T}, Vector{$T}}) = @ccall (
+    #=@eval SparseSolve(arg1::SparseOpaqueFactorization{$T},
+                    arg2::Union{DenseVector{$T}, StridedVector{$T}}) = @ccall (
         LIBSPARSE.$sparseSolveVecInPlace(arg1::SparseOpaqueFactorization{$T},
                                             arg2::DenseVector{$T})::Cvoid
-    )
+    )=#
+    @eval function SparseSolve(arg1::SparseOpaqueFactorization{$T},
+                                arg2::Union{DenseVector{$T}, StridedVector{$T}})
+        @ccall LIBSPARSE.$sparseSolveVecInPlace(arg1::SparseOpaqueFactorization{$T},
+                                            arg2::DenseVector{$T})::Cvoid
+        if arg2 isa StridedVector
+            resize!(arg2, arg1.symbolicFactorization.columnCount)
+        end
+    end
 
     local sparseSolveVec = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseVector_FloatS0_ :
                                     :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseVector_DoubleS0_
     @eval SparseSolve(arg1::SparseOpaqueFactorization{$T},
-                    arg2::Union{DenseVector{$T}, Vector{$T}},
-                    arg3::Union{DenseVector{$T}, Vector{$T}}) = @ccall (
+                    arg2::Union{DenseVector{$T}, StridedVector{$T}},
+                    arg3::Union{DenseVector{$T}, StridedVector{$T}}) = @ccall (
         LIBSPARSE.$sparseSolveVec(arg1::SparseOpaqueFactorization{$T},
-                                arg2::DenseVector{$T}, arg3::DenseVector{$T})::Cvoid
+                                arg2::DenseVector{$T},
+                                arg3::DenseVector{$T})::Cvoid
     )
 end
+
 SparseCleanup(arg1::SparseOpaqueSymbolicFactorization) = @ccall (
         LIBSPARSE._Z13SparseCleanup33SparseOpaqueSymbolicFactorization(
                                 arg1::SparseOpaqueSymbolicFactorization)::Cvoid

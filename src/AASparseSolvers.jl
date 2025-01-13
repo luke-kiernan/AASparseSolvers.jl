@@ -104,7 +104,7 @@ function factor!(aa_fact::AAFactorization{T})  where T<:vTypes
     end
 end
 
-function solve(aa_fact::AAFactorization{T}, b::Union{Matrix{T}, Vector{T}}) where T<:vTypes
+function solve(aa_fact::AAFactorization{T}, b::Union{StridedMatrix{T}, StridedVector{T}}) where T<:vTypes
     @assert aa_fact.aa_matrix.structure.columnCount == size(b, 1)
     factor!(aa_fact)
     x = Array{T}(undef, aa_fact.aa_matrix.structure.columnCount, size(b)[2:end]...)
@@ -112,13 +112,15 @@ function solve(aa_fact::AAFactorization{T}, b::Union{Matrix{T}, Vector{T}}) wher
     return x
 end
 
-function solve!(aa_fact::AAFactorization{T}, b::Union{Matrix{T}, Vector{T}}) where T<:vTypes
-    @assert aa_fact.aa_matrix.structure.rowCount == aa_fact.aa_matrix.structure.columnCount "Buffer sizes different"
+function solve!(aa_fact::AAFactorization{T}, xb::Union{StridedMatrix{T}, StridedVector{T}}) where T<:vTypes
+    @assert (xb isa StridedVector) ||
+            (aa_fact.aa_matrix.structure.rowCount == 
+            aa_fact.aa_matrix.structure.columnCount) "Julia cannot resize a matrix"
+    # Apple's library can handle non-square, but it's awkward with the Julia
     factor!(aa_fact)
-    AASparseSolvers.SparseSolve(aa_fact._factorization, b)
-    return b
+    AASparseSolvers.SparseSolve(aa_fact._factorization, xb)
 end
 
-export AAFactorization, solve
+export AAFactorization, solve, solve!
 
 end # module AASparseSolvers
