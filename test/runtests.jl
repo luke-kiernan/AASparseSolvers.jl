@@ -202,10 +202,24 @@ end
     bx, BX = zeros(4), zeros(4,4)
     bx[1:3], BX[1:3, :] = b, B
     solve!(aa_fact2, bx)
-    # These are close-ish, which makes me think it's just
-    # an accuracy problem.
-    # @test isapprox(bx, x; 0.001)
+    # Seems like julia and apple make different choices
+    # when there's multiple solutions.
+    # @test isapprox(bx, shortMatrix\b)
+    @test isapprox(shortMatrix * bx, b)
     
     # solve!(aa_fact2, BX)
     # @test BX ≈ X
+end
+
+@testset "symmetric LDLT" begin
+    N = 4
+    temp = sprand(N, N, 0.3)
+    A = sparse(temp*temp' + diagm(rand(N)))
+    A2 = tril(A)
+    sym_fact = AAFactorization(A2, true, false)
+    @test (sym_fact.aa_matrix.structure.attributes | AASparseSolvers.ATT_SYMMETRIC) != 0
+    x, X = rand(N), rand(N, 4)
+    b, B = A*x, A*X
+    @test solve(sym_fact, b) ≈ x
+    @test solve(sym_fact, B) ≈ X
 end

@@ -12,11 +12,22 @@ mutable struct AAFactorization{T<:vTypes}
     _factorization::Union{Nothing, SparseOpaqueFactorization}
 end
 
-function AAFactorization(sparseM::SparseMatrixCSC{T, Int64})  where T<:vTypes
+# if symmetric, only have the one triangle (upper or lower) populated.
+# (if both are populated, things work still: it's just redundant.)
+function AAFactorization(sparseM::SparseMatrixCSC{T, Int64},
+                                symmetric::Bool = false, upperTriangle::Bool = false) where T<:vTypes
+    kind = nothing
+    if symmetric && upperTriangle
+        kind = AASparseSolvers.ATT_SYMMETRIC | AASparseSolvers.ATT_UPPER_TRIANGLE 
+    elseif symmetric
+        kind = AASparseSolvers.ATT_SYMMETRIC | AASparseSolvers.ATT_LOWER_TRIANGLE
+    else
+        kind = AASparseSolvers.ATT_ORDINARY
+    end
     c = Clong.(sparseM.colptr .+ -1)
     r = Cint.(sparseM.rowval .+ -1)
     vals = copy(sparseM.nzval)
-    s = SparseMatrixStructure(size(sparseM)..., pointer(c), pointer(r), ATT_ORDINARY, 1)
+    s = SparseMatrixStructure(size(sparseM)..., pointer(c), pointer(r), kind, 1)
     obj = AAFactorization(
         SparseMatrix(s, pointer(vals)),
         c, r, vals,
@@ -42,7 +53,10 @@ end
 
 function factor!(aa_fact::AAFactorization{T})  where T<:vTypes
     if isnothing(aa_fact._factorization)
-        aa_fact._factorization = AASparseSolvers.SparseFactor(AASparseSolvers.SparseFactorizationQR, aa_fact.aa_matrix)
+        ordinary = aa_fact.aa_matrix.structure.attributes == AASparseSolvers.ATT_ORDINARY
+        whichKind = ordinary ?  AASparseSolvers.SparseFactorizationQR :
+                                    AASparseSolvers.SparseFactorizationLDLT
+        aa_fact._factorization = AASparseSolvers.SparseFactor(whichKind, aa_fact.aa_matrix, true)
     end
 end
 

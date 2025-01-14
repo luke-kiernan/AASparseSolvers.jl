@@ -1,8 +1,8 @@
 using SparseArrays
 
 @enum SparseTriangle_t::UInt8 begin
-    SparseLowerTriangle = 0
-    SparseUpperTriangle = 1
+    SparseUpperTriangle = 0
+    SparseLowerTriangle = 1
 end
 
 @enum SparseKind_t::UInt32 begin
@@ -53,8 +53,8 @@ end
 # directly. Workaround with flags:
 const att_type = Cuint
 const ATT_TRANSPOSE = att_type(1)
-const ATT_LOWER_TRIANGLE = att_type(0)
-const ATT_UPPER_TRIANGLE = att_type(2)
+const ATT_UPPER_TRIANGLE = att_type(0)
+const ATT_LOWER_TRIANGLE = att_type(2)
 const ATT_ORDINARY = att_type(0)
 const ATT_TRIANGULAR = att_type(4)
 const ATT_UNIT_TRIANGULAR = att_type(8)
@@ -80,12 +80,13 @@ struct SparseNumericFactorOptions
     zeroTolerance::Float64
 end
 
-SparseNumericFactorOptions() = SparseNumericFactorOptions(
+# default tolerance parameters found in SolveImplementation.h header.
+SparseNumericFactorOptions(T::Type) = SparseNumericFactorOptions(
     SparseDefaultControl,
     SpraseScalingDefault,
     C_NULL,
-    0.1, # these only matter for symmetric anyway.
-    eps(Float32)
+    T == Cfloat ? 0.1 : 0.01,
+    eps(T)*1e-4
 )
 
 # Note: to use system defaults, values of malloc/free should be
@@ -162,6 +163,7 @@ Base.cconvert(::Type{DenseMatrix{T}}, m::StridedMatrix{T}) where T<:vTypes = m
 
 function Base.unsafe_convert(::Type{DenseMatrix{T}}, m::StridedMatrix{T}) where T<:vTypes
     @assert stride(m, 1) == 1
+    # this hard-coded ATT_ORDINARY could get me in trouble later
     return DenseMatrix{T}(size(m)..., stride(m, 2), ATT_ORDINARY, pointer(m))
 end
 
@@ -328,13 +330,13 @@ for T in (Cfloat, Cdouble)
                         arg2::SparseMatrix{$T},
                         noErrors::Bool = false) = 
                 noErrors ? SparseFactor(arg1, arg2) :
-                SparseFactor(arg1, arg2, SparseSymbolicFactorOptions(), SparseNumericFactorOptions()) 
+                SparseFactor(arg1, arg2, SparseSymbolicFactorOptions(), SparseNumericFactorOptions($T)) 
 
     local sparseFactorMatrix = T == Cfloat ? :_Z12SparseFactorh18SparseMatrix_Float :
                                                 :_Z12SparseFactorh19SparseMatrix_Double
     @eval SparseFactorNoErrors(arg1::SparseFactorization_t,
                                 arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T} = @ccall(
-        LIBSPARSE.$sparseFactorMatrix(arg1::SparseFactorization_t,
+        LIBSPARSE.$sparseFactorMatrix(arg1::Cuint,
                                         arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
     )
 
@@ -404,7 +406,7 @@ end
 # with the library code (due to being from Objective-C, not from C)
 SparseFactorNoErrors(arg1::SparseFactorization_t, arg2::SparseMatrixStructure) = @ccall (
     LIBSPARSE._Z12SparseFactorh21SparseMatrixStructure(
-        arg1::SparseFactorization_t, arg2::SparseMatrixStructure
+        arg1::Cuint, arg2::SparseMatrixStructure
     )::SparseOpaqueSymbolicFactorization
 )
 
