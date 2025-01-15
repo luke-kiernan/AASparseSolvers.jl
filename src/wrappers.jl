@@ -1,5 +1,8 @@
 using SparseArrays
 
+# unused. But if I can find a library that supports C-style structs
+# of packed bitflags with enum fields, then I'll want them.
+#=
 @enum SparseTriangle_t::UInt8 begin
     SparseUpperTriangle = 0
     SparseLowerTriangle = 1
@@ -10,7 +13,7 @@ end
     SparseTriangular = 1
     SparseUnitTriangular = 2
     SparseSymmetric = 4
-end
+end=#
 
 @enum SparseFactorization_t::UInt8 begin
     SparseFactorizationCholesky = 0
@@ -49,8 +52,7 @@ end
     SparseDefaultControl = 0
 end
 
-# can't pack bitflags in raw Julia, so can't implement SparseAttributes
-# directly. Workaround with flags:
+# can't implement SparseAttributes directly. Workaround:
 const att_type = Cuint
 const ATT_TRANSPOSE = att_type(1)
 const ATT_UPPER_TRIANGLE = att_type(0)
@@ -129,7 +131,6 @@ struct DenseMatrix{T<:vTypes}
     data::Ptr{T}
 end
 
-# must be immutable.
 struct SparseOpaqueSymbolicFactorization
     status::SparseStatus_t 
     rowCount::Cint 

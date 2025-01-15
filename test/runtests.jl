@@ -191,8 +191,7 @@ end
     aa_fact = AAFactorization(tallMatrix)
     x, X = rand(3), rand(3, 3)
     b, B = tallMatrix * x, tallMatrix * X
-    solve!(aa_fact, b)
-    @test isapprox(b, x; 0.001)
+    @test isapprox(solve!(aa_fact, b), x; 0.001)
     # solve!(aa_fact, B)
     # @test isapprox(B, X; 0.001)
     shortMatrix = sprand(3,4,0.9)
@@ -201,11 +200,10 @@ end
     b, B = shortMatrix * x, shortMatrix * X
     bx, BX = zeros(4), zeros(4,4)
     bx[1:3], BX[1:3, :] = b, B
-    solve!(aa_fact2, bx)
     # Seems like julia and apple make different choices
     # when there's multiple solutions.
     # @test isapprox(bx, shortMatrix\b)
-    @test isapprox(shortMatrix * bx, b)
+    @test isapprox(shortMatrix * solve!(aa_fact2, bx), b)
     
     # solve!(aa_fact2, BX)
     # @test BX ≈ X

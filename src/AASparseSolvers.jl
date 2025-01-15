@@ -14,8 +14,10 @@ end
 
 # if symmetric, only have the one triangle (upper or lower) populated.
 # (if both are populated, things work still: it's just redundant.)
+# TODO: way that's compatible with julia's special matrix classes?
 function AAFactorization(sparseM::SparseMatrixCSC{T, Int64},
-                                symmetric::Bool = false, upperTriangle::Bool = false) where T<:vTypes
+                                symmetric::Bool = false,
+                                upperTriangle::Bool = false) where T<:vTypes
     kind = nothing
     if symmetric && upperTriangle
         kind = AASparseSolvers.ATT_SYMMETRIC | AASparseSolvers.ATT_UPPER_TRIANGLE 
@@ -41,6 +43,8 @@ function AAFactorization(sparseM::SparseMatrixCSC{T, Int64},
     return finalizer(cleanup, obj)
 end
 
+# this really ought to operate on a matrix wrapper, not a factorization...
+# write a more polished wrapper and replace aa_matrix with that?
 function Base.:(*)(A::AAFactorization{T}, x::Union{Matrix{T},Vector{T}}) where T<:vTypes
     @assert size(x)[1] == A.aa_matrix.structure.columnCount
     y = Array{T}(undef, A.aa_matrix.structure.rowCount, size(x)[2:end]...)
@@ -51,12 +55,17 @@ function Base.:(*)(A::AAFactorization{T}, x::Union{Matrix{T},Vector{T}}) where T
     return y
 end
 
-function factor!(aa_fact::AAFactorization{T})  where T<:vTypes
+# TODO: I could make this follow the defaults and naming conventions of
+# https://docs.julialang.org/en/v1/stdlib/LinearAlgebra/#LinearAlgebra.factorize
+function factor!(aa_fact::AAFactorization{T},
+                kind::Union{SparseFactorization_t, Nothing} = nothing) where T<:vTypes
     if isnothing(aa_fact._factorization)
-        ordinary = aa_fact.aa_matrix.structure.attributes == AASparseSolvers.ATT_ORDINARY
-        whichKind = ordinary ?  AASparseSolvers.SparseFactorizationQR :
+        if isnothing(kind)
+            ordinary = aa_fact.aa_matrix.structure.attributes == AASparseSolvers.ATT_ORDINARY
+            kind = ordinary ?  AASparseSolvers.SparseFactorizationQR :
                                     AASparseSolvers.SparseFactorizationLDLT
-        aa_fact._factorization = AASparseSolvers.SparseFactor(whichKind, aa_fact.aa_matrix, true)
+        end
+        aa_fact._factorization = AASparseSolvers.SparseFactor(kind, aa_fact.aa_matrix, true)
     end
 end
 
@@ -71,11 +80,14 @@ end
 function solve!(aa_fact::AAFactorization{T}, xb::Union{StridedMatrix{T}, StridedVector{T}}) where T<:vTypes
     @assert (xb isa StridedVector) ||
             (aa_fact.aa_matrix.structure.rowCount == 
-            aa_fact.aa_matrix.structure.columnCount) "Julia cannot resize a matrix"
-    # Apple's library can handle non-square, but it's awkward with the Julia
+            aa_fact.aa_matrix.structure.columnCount) "Can't in-place solve:" *
+            " x and b are different sizes and Julia cannot resize a matrix."
     factor!(aa_fact)
     AASparseSolvers.SparseSolve(aa_fact._factorization, xb)
+    return xb # because KLU also returns
 end
+
+# TODO: ldiv!
 
 export AAFactorization, solve, solve!
 
