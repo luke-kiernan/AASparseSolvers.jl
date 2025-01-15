@@ -3,7 +3,7 @@ using LinearAlgebra
 using AASparseSolvers
 using SparseArrays
 
-@testset "SparseMultiply and SparseMultiplyAdd" begin
+@testset "ccalls SparseMultiply and SparseMultiplyAdd" begin
     # less copy-paste heavy way?
     for T in (Float32, Float64)
         @eval begin
@@ -71,22 +71,38 @@ end
     end
 end
 
+@testset "AASparseMatrix arithmetic" begin
+    N = 10
+    sparseM = sprand(N, N, 0.3)
+    alpha = rand(Float64)
+    aaM = AASparseMatrix(sparseM)
+    X, x = rand(N, N), rand(N)
+    @test aaM*x ≈ sparseM*x
+    @test aaM*X ≈ sparseM*X
+    @test alpha*aaM*x ≈ alpha*sparseM*x
+    @test alpha*aaM*X ≈ alpha*sparseM*X
+    Y, y = rand(N,N), rand(N)
+    FMA, fma = sparseM*X + Y, sparseM*x + y
+    muladd!(aaM, x, y)
+    muladd!(aaM, X, Y)
+    @test Y ≈ FMA
+    @test y ≈ fma
+    Y, y = rand(N,N), rand(N)
+    FMA2, fma2 = alpha*sparseM*X + Y, alpha*sparseM*x + y
+    muladd!(alpha, aaM, x, y)
+    muladd!(alpha, aaM, X, Y)
+    @test Y ≈ FMA2
+    @test y ≈ fma2
+end
 
-#=@testset "cconvert and unsafe_convert sparse" begin
-    A = SparseMatrixCSC{Float64, Int32}(Array(sprand(Float64, 4, 4, 0.5)))
-    x = rand(Float64, 4)
-    res = zeros(Float64, 4)
-    AASparseSolvers.SparseMultiply(A, x, res)
-    @test res ≈ A*x
-end=#
-
-@testset "AAFactorization *" begin
-    for T in (Float32, Float64)
-        @eval begin
-            jlA = sprand($T, 3, 3, 0.5)
-            x = rand($T, 3, 3)
-            aaA = AAFactorization(jlA)
-            @test aaA * x ≈ Array(jlA) * x
+@testset "AASparseMatrix getindex" begin
+    N = 3
+    M = 4
+    sparseM = sprand(N, M, 0.5)
+    aaM = AASparseMatrix(sparseM)
+    for i in 1:N
+        for j in 1:M
+            @test aaM[i,j] == sparseM[i,j]
         end
     end
 end
@@ -210,6 +226,7 @@ end
 end
 
 @testset "symmetric LDLT" begin
+    # create a random symmetric positive-definite matrix A.
     N = 4
     temp = sprand(N, N, 0.3)
     A = sparse(temp*temp' + diagm(rand(N)))

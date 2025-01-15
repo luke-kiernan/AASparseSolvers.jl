@@ -2,6 +2,84 @@ module AASparseSolvers
 using LinearAlgebra
 include("wrappers.jl")
 
+mutable struct AASparseMatrix{T<:vTypes}# <: AbstractMatrix{T}
+    matrix::SparseMatrix{T}
+    _colptr::Vector{Clong}
+    _rowval::Vector{Cint}
+    _nzval::Vector{T}  
+end
+
+# I use StridedVector here because it allows for views/references,
+# so you can do shallow copies: same pointed-to data. Better way?  
+function AASparseMatrix(n::Int, m::Int,
+            col::StridedVector{Clong}, row::StridedVector{Cint},
+            data::StridedVector{T}) where T<:vTypes
+    @assert stride(col, 1) == 1 && stride(row, 1) == 1 && stride(data, 1) == 1
+    # I'm assuming here that pointer(row) == pointer(_row_inds),
+    # ie that col, row, and data are passed by reference, not by value.
+    s = SparseMatrixStructure(n, m, pointer(col),
+                    pointer(row), ATT_ORDINARY, 1)
+    m = SparseMatrix(s, pointer(data))
+    return AASparseMatrix(m, col, row, data)
+end
+
+function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64}) where T<:vTypes
+    c = Clong.(sparseM.colptr .+ -1)
+    r = Cint.(sparseM.rowval .+ -1)
+    vals = copy(sparseM.nzval)
+    return AASparseMatrix(size(sparseM)..., c, r, vals)
+end
+
+Base.size(M::AASparseMatrix) = (M.matrix.structure.rowCount, M.matrix.structure.columnCount)
+Base.eltype(M::AASparseMatrix) = eltype(M._nzval)
+
+function Base.getindex(M::AASparseMatrix, i::Int, j::Int)
+    @assert all((1, 1) .<= (i,j) .<= size(M))
+    (startCol, endCol) = (M._colptr[j], M._colptr[j+1]-1) .+ 1
+    rowsInCol = @view M._rowval[startCol:endCol]
+    ind = searchsortedfirst(rowsInCol, i-1)
+    if ind <= length(rowsInCol) && rowsInCol[ind] == i-1
+        return M._nzval[startCol+ind-1]
+    end
+    return zero(eltype(M))
+end
+
+# Creates a new structure, referring to the same data,
+# but with the transpose flag (in attributes) flipped.
+# TODO: untested
+Base.transpose(M::AASparseMatrix) = AASparseMatrix(SparseGetTranspose(M.matrix),
+                        M._colptr, M._rowval, M._nzval)
+
+function Base.:(*)(A::AASparseMatrix{T}, x::StridedVecOrMat{T}) where T<:vTypes
+    @assert size(x)[1] == size(A)[2]
+    y = Array{T}(undef, size(A)[1], size(x)[2:end]...)
+    SparseMultiply(A.matrix, x, y)
+    return y
+end
+
+function Base.:(*)(alpha::T, A::AASparseMatrix{T},
+                            x::StridedVecOrMat{T}) where T<:vTypes
+    @assert size(x)[1] == size(A)[2]
+    y = Array{T}(undef, size(A)[1], size(x)[2:end]...)
+    SparseMultiply(alpha, A.matrix, x, y)
+    return y
+end
+
+# modifies its LAST argument.
+function muladd!(A::AASparseMatrix{T}, x::StridedVecOrMat{T},
+                    y::StridedVecOrMat{T}) where T<:vTypes
+    @assert size(x) == size(y) && size(x)[1] == size(A)[2]
+    SparseMultiplyAdd(A.matrix, x, y)
+end
+
+# modifies its LAST argument.
+function muladd!(alpha::T, A::AASparseMatrix{T},
+                x::StridedVecOrMat{T}, y::StridedVecOrMat{T}) where T<:vTypes
+    @assert size(x) == size(y) && size(x)[1] == size(A)[2]
+    SparseMultiplyAdd(alpha, A.matrix, x, y)
+end
+
+# I should probably make this a subclass of Factorization.
 mutable struct AAFactorization{T<:vTypes}
     aa_matrix::SparseMatrix{T}
     # these don't *quite* match SparseArrayCSC fields: 1 vs 0 indexing,
@@ -43,18 +121,6 @@ function AAFactorization(sparseM::SparseMatrixCSC{T, Int64},
     return finalizer(cleanup, obj)
 end
 
-# this really ought to operate on a matrix wrapper, not a factorization...
-# write a more polished wrapper and replace aa_matrix with that?
-function Base.:(*)(A::AAFactorization{T}, x::Union{Matrix{T},Vector{T}}) where T<:vTypes
-    @assert size(x)[1] == A.aa_matrix.structure.columnCount
-    y = Array{T}(undef, A.aa_matrix.structure.rowCount, size(x)[2:end]...)
-    if length(size(x)) == 2
-        @assert size(y)[2] == size(x)[2]
-    end
-    SparseMultiply(A.aa_matrix, x, y)
-    return y
-end
-
 # TODO: I could make this follow the defaults and naming conventions of
 # https://docs.julialang.org/en/v1/stdlib/LinearAlgebra/#LinearAlgebra.factorize
 function factor!(aa_fact::AAFactorization{T},
@@ -89,6 +155,6 @@ end
 
 # TODO: ldiv!
 
-export AAFactorization, solve, solve!
+export AAFactorization, solve, solve!, AASparseMatrix, muladd!
 
 end # module AASparseSolvers
