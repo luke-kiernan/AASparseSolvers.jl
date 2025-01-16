@@ -80,7 +80,7 @@ function muladd!(alpha::T, A::AASparseMatrix{T},
 end
 
 # I should probably make this a subclass of Factorization.
-mutable struct AAFactorization{T<:vTypes}
+mutable struct AAFactorization{T<:vTypes} <: LinearAlgebra.Factorization{T}
     aa_matrix::SparseMatrix{T}
     # these don't *quite* match SparseArrayCSC fields: 1 vs 0 indexing,
     # Cint vs Clong for row indices.
@@ -135,7 +135,7 @@ function factor!(aa_fact::AAFactorization{T},
     end
 end
 
-function solve(aa_fact::AAFactorization{T}, b::Union{StridedMatrix{T}, StridedVector{T}}) where T<:vTypes
+function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTypes
     @assert aa_fact.aa_matrix.structure.columnCount == size(b, 1)
     factor!(aa_fact)
     x = Array{T}(undef, aa_fact.aa_matrix.structure.columnCount, size(b)[2:end]...)
@@ -143,7 +143,7 @@ function solve(aa_fact::AAFactorization{T}, b::Union{StridedMatrix{T}, StridedVe
     return x
 end
 
-function solve!(aa_fact::AAFactorization{T}, xb::Union{StridedMatrix{T}, StridedVector{T}}) where T<:vTypes
+function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vTypes
     @assert (xb isa StridedVector) ||
             (aa_fact.aa_matrix.structure.rowCount == 
             aa_fact.aa_matrix.structure.columnCount) "Can't in-place solve:" *
@@ -153,7 +153,17 @@ function solve!(aa_fact::AAFactorization{T}, xb::Union{StridedMatrix{T}, Strided
     return xb # because KLU also returns
 end
 
-# TODO: ldiv!
+LinearAlgebra.ldiv!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vTypes =
+        solve!(aa_fact, xb)
+
+function LinearAlgebra.ldiv!(x::StridedVecOrMat{T},
+                            aa_fact::AAFactorization{T},
+                            b::StridedVecOrMat{T}) where T<:vTypes
+    @assert aa_fact.aa_matrix.structure.columnCount == size(b, 1)
+    factor!(aa_fact)
+    AASparseSolvers.SparseSolve(aa_fact._factorization, b, x)
+    return x
+end
 
 export AAFactorization, solve, solve!, AASparseMatrix, muladd!
 

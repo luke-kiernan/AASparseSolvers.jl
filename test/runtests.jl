@@ -120,6 +120,8 @@ end
             @test solve(test_fact, B) ≈ Array(jlA) \ B
             b = rand($T, N)
             @test solve(test_fact, b) ≈ Array(jlA) \ b
+            @test test_fact \ B ≈ Array(jlA) \ B
+            @test test_fact \ b ≈ Array(jlA) \ b
         end
     end
 end
