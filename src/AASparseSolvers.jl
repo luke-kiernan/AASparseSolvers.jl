@@ -87,7 +87,7 @@ mutable struct AAFactorization{T<:vTypes} <: LinearAlgebra.Factorization{T}
     _col_inds::Vector{Clong}
     _row_inds::Vector{Cint}
     _data::Vector{T}
-    _factorization::Union{Nothing, SparseOpaqueFactorization}
+    _factorization::SparseOpaqueFactorization
 end
 
 # if symmetric, only have the one triangle (upper or lower) populated.
@@ -111,10 +111,11 @@ function AAFactorization(sparseM::SparseMatrixCSC{T, Int64},
     obj = AAFactorization(
         SparseMatrix(s, pointer(vals)),
         c, r, vals,
-        nothing
+        AASparseSolvers.SparseOpaqueFactorization(eltype(sparseM))
     )
     function cleanup(aa_fact)
-        if !isnothing(aa_fact._factorization)
+        # If it's yet-to-be-factored, then there's nothing to release
+        if !(aa_fact._factorization.status in (SparseYetToBeFactored, SparseStatusReleased))
             AASparseSolvers.SparseCleanup(aa_fact._factorization)
         end
     end
@@ -123,14 +124,11 @@ end
 
 # TODO: I could make this follow the defaults and naming conventions of
 # https://docs.julialang.org/en/v1/stdlib/LinearAlgebra/#LinearAlgebra.factorize
-function factor!(aa_fact::AAFactorization{T},
-                kind::Union{SparseFactorization_t, Nothing} = nothing) where T<:vTypes
-    if isnothing(aa_fact._factorization)
-        if isnothing(kind)
-            ordinary = aa_fact.aa_matrix.structure.attributes == AASparseSolvers.ATT_ORDINARY
-            kind = ordinary ?  AASparseSolvers.SparseFactorizationQR :
+function factor!(aa_fact::AAFactorization{T}) where T<:vTypes
+    if aa_fact._factorization.status == SparseYetToBeFactored
+        ordinary = aa_fact.aa_matrix.structure.attributes == AASparseSolvers.ATT_ORDINARY
+        kind = ordinary ?  AASparseSolvers.SparseFactorizationQR :
                                     AASparseSolvers.SparseFactorizationLDLT
-        end
         aa_fact._factorization = AASparseSolvers.SparseFactor(kind, aa_fact.aa_matrix, true)
     end
 end

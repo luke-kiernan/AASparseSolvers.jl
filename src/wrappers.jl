@@ -45,6 +45,7 @@ end
     SparseMatrixIsSingular = -2
     SparseInternalError = -3
     SparseParameterError = -4
+    SparseYetToBeFactored = -5 # my own addition.
     SparseStatusReleased = -2147483647
 end
 
@@ -145,6 +146,16 @@ struct SparseOpaqueSymbolicFactorization
     factorSize_Double::Csize_t
 end
 
+SparseOpaqueSymbolicFactorization() = SparseOpaqueSymbolicFactorization(
+    SparseYetToBeFactored,
+    0, 0,
+    ATT_ORDINARY,
+    0,
+    SparseFactorizationQR,
+    C_NULL,
+    0, 0, 0, 0
+)
+
 # TODO: I have T here to match the C: _Double, _Float variants. But T isn't used!!
 struct SparseOpaqueFactorization{T<:vTypes}
     status::SparseStatus_t
@@ -155,6 +166,15 @@ struct SparseOpaqueFactorization{T<:vTypes}
     solveWorkspaceRequiredStatic::Csize_t
     solveWorkspaceRequiredPerRHS::Csize_t
 end
+
+SparseOpaqueFactorization(T::Type) = SparseOpaqueFactorization{T}(
+    SparseYetToBeFactored,
+    ATT_ORDINARY,
+    SparseOpaqueSymbolicFactorization(),
+    false,
+    C_NULL,
+    0, 0
+)
 
 # ignore for now: anything involving Subfactor, Preconditioner, or IterativeMethod
 
