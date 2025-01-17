@@ -23,6 +23,7 @@ end=#
     SparseFactorizationLDLTTPP = 4
     SparseFactorizationQR = 40
     SparseFactorizationCholeskyAtA = 41
+    SparseFactorizationTBD = 64 # my own addition.
 end
 
 @enum SparseOrder_t::UInt8 begin
@@ -355,25 +356,28 @@ for T in (Cfloat, Cdouble)
 
     local sparseFactorMatrix = T == Cfloat ? :_Z12SparseFactorh18SparseMatrix_Float :
                                                 :_Z12SparseFactorh19SparseMatrix_Double
-    @eval SparseFactorNoErrors(arg1::SparseFactorization_t,
-                                arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T} = @ccall(
-        LIBSPARSE.$sparseFactorMatrix(arg1::Cuint,
-                                        arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
-    )
+    @eval function SparseFactorNoErrors(arg1::SparseFactorization_t,
+                                arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T}
+        @assert arg1 != SparseFactorizationTBD
+        @ccall(LIBSPARSE.$sparseFactorMatrix(arg1::Cuint,
+                                        arg2::SparseMatrix{$T})::SparseOpaqueFactorization{$T})
+    end
 
     local sparseFactorMatrixOpts = T == Cfloat ? :_Z12SparseFactorh18SparseMatrix_Float27SparseSymbolicFactorOptions26SparseNumericFactorOptions :
                                            :_Z12SparseFactorh19SparseMatrix_Double27SparseSymbolicFactorOptions26SparseNumericFactorOptions     
-    @eval SparseFactor(arg1::SparseFactorization_t,
+    @eval function SparseFactor(arg1::SparseFactorization_t,
                     arg2::SparseMatrix{$T},
                     arg3::SparseSymbolicFactorOptions,
-                    arg4::SparseNumericFactorOptions) = @ccall(
-            LIBSPARSE.$sparseFactorMatrixOpts(
+                    arg4::SparseNumericFactorOptions)
+        @assert arg1 != SparseFactorizationTBD
+        @ccall(LIBSPARSE.$sparseFactorMatrixOpts(
                     arg1::Cuint,
                     arg2::SparseMatrix{$T},
                     arg3::SparseSymbolicFactorOptions,
                     arg4::SparseNumericFactorOptions
             )::SparseOpaqueFactorization{$T}
         )
+    end
 
     local sparseSolveInplace = T == Cfloat ? :_Z11SparseSolve31SparseOpaqueFactorization_Float17DenseMatrix_Float :
                                             :_Z11SparseSolve32SparseOpaqueFactorization_Double18DenseMatrix_Double

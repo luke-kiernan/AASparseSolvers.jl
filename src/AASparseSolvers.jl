@@ -79,7 +79,7 @@ function muladd!(alpha::T, A::AASparseMatrix{T},
     SparseMultiplyAdd(alpha, A.matrix, x, y)
 end
 
-# I should probably make this a subclass of Factorization.
+# TODO: replace aa_matrix with my new AASparseMatrix class.
 mutable struct AAFactorization{T<:vTypes} <: LinearAlgebra.Factorization{T}
     aa_matrix::SparseMatrix{T}
     # these don't *quite* match SparseArrayCSC fields: 1 vs 0 indexing,
@@ -87,7 +87,7 @@ mutable struct AAFactorization{T<:vTypes} <: LinearAlgebra.Factorization{T}
     _col_inds::Vector{Clong}
     _row_inds::Vector{Cint}
     _data::Vector{T}
-    _factorization::SparseOpaqueFactorization
+    _factorization::SparseOpaqueFactorization{T}
 end
 
 # if symmetric, only have the one triangle (upper or lower) populated.
@@ -96,13 +96,11 @@ end
 function AAFactorization(sparseM::SparseMatrixCSC{T, Int64},
                                 symmetric::Bool = false,
                                 upperTriangle::Bool = false) where T<:vTypes
-    kind = nothing
+    kind = ATT_ORDINARY
     if symmetric && upperTriangle
-        kind = AASparseSolvers.ATT_SYMMETRIC | AASparseSolvers.ATT_UPPER_TRIANGLE 
+        kind = ATT_SYMMETRIC | ATT_UPPER_TRIANGLE 
     elseif symmetric
-        kind = AASparseSolvers.ATT_SYMMETRIC | AASparseSolvers.ATT_LOWER_TRIANGLE
-    else
-        kind = AASparseSolvers.ATT_ORDINARY
+        kind = ATT_SYMMETRIC | ATT_LOWER_TRIANGLE
     end
     c = Clong.(sparseM.colptr .+ -1)
     r = Cint.(sparseM.rowval .+ -1)
@@ -111,12 +109,12 @@ function AAFactorization(sparseM::SparseMatrixCSC{T, Int64},
     obj = AAFactorization(
         SparseMatrix(s, pointer(vals)),
         c, r, vals,
-        AASparseSolvers.SparseOpaqueFactorization(eltype(sparseM))
+        SparseOpaqueFactorization(T)
     )
     function cleanup(aa_fact)
         # If it's yet-to-be-factored, then there's nothing to release
         if !(aa_fact._factorization.status in (SparseYetToBeFactored, SparseStatusReleased))
-            AASparseSolvers.SparseCleanup(aa_fact._factorization)
+            SparseCleanup(aa_fact._factorization)
         end
     end
     return finalizer(cleanup, obj)
@@ -124,12 +122,17 @@ end
 
 # TODO: I could make this follow the defaults and naming conventions of
 # https://docs.julialang.org/en/v1/stdlib/LinearAlgebra/#LinearAlgebra.factorize
-function factor!(aa_fact::AAFactorization{T}) where T<:vTypes
+# TODO: add tests for the different kinds of factorizations, beyond QR.
+function factor!(aa_fact::AAFactorization{T},
+            kind::SparseFactorization_t = SparseFactorizationTBD) where T<:vTypes
     if aa_fact._factorization.status == SparseYetToBeFactored
-        ordinary = aa_fact.aa_matrix.structure.attributes == AASparseSolvers.ATT_ORDINARY
-        kind = ordinary ?  AASparseSolvers.SparseFactorizationQR :
-                                    AASparseSolvers.SparseFactorizationLDLT
-        aa_fact._factorization = AASparseSolvers.SparseFactor(kind, aa_fact.aa_matrix, true)
+        if kind == SparseFactorizationTBD
+            # so far I'm only dealing with ordinary and symmetric
+            ordinary = aa_fact.aa_matrix.structure.attributes == ATT_ORDINARY
+            kind = ordinary ?  SparseFactorizationQR :
+                                        SparseFactorizationCholesky
+        end
+        aa_fact._factorization = SparseFactor(kind, aa_fact.aa_matrix)
     end
 end
 
@@ -137,7 +140,7 @@ function solve(aa_fact::AAFactorization{T}, b::StridedVecOrMat{T}) where T<:vTyp
     @assert aa_fact.aa_matrix.structure.columnCount == size(b, 1)
     factor!(aa_fact)
     x = Array{T}(undef, aa_fact.aa_matrix.structure.columnCount, size(b)[2:end]...)
-    AASparseSolvers.SparseSolve(aa_fact._factorization, b, x)
+    SparseSolve(aa_fact._factorization, b, x)
     return x
 end
 
@@ -147,7 +150,7 @@ function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vT
             aa_fact.aa_matrix.structure.columnCount) "Can't in-place solve:" *
             " x and b are different sizes and Julia cannot resize a matrix."
     factor!(aa_fact)
-    AASparseSolvers.SparseSolve(aa_fact._factorization, xb)
+    SparseSolve(aa_fact._factorization, xb)
     return xb # because KLU also returns
 end
 
@@ -159,7 +162,7 @@ function LinearAlgebra.ldiv!(x::StridedVecOrMat{T},
                             b::StridedVecOrMat{T}) where T<:vTypes
     @assert aa_fact.aa_matrix.structure.columnCount == size(b, 1)
     factor!(aa_fact)
-    AASparseSolvers.SparseSolve(aa_fact._factorization, b, x)
+    SparseSolve(aa_fact._factorization, b, x)
     return x
 end
 
