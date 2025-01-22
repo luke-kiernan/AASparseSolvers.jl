@@ -3,9 +3,7 @@ using LinearAlgebra
 include("wrappers.jl")
 
 @doc """Matrix wrapper, containing the Apple sparse matrix struct
-and the pointed-to data. Construct from a `SparseMatrixCSC`, or
-a `Symmetric` sparse matrix object. libSparse has the infrastructure
-for upper/lower triangular, but those aren't implemented yet.
+and the pointed-to data. Construct from a `SparseMatrixCSC`.
 
 Multiplication (`*`) and multiply-add (`muladd!`) with both
 `Vector` and `Matrix` objects are working.
@@ -21,7 +19,7 @@ end
 
 # I use StridedVector here because it allows for views/references,
 # so you can do shallow copies: same pointed-to data. Better way?
-"""Intended as an advanced constructor: col and row here are 0-indexed CSC data.
+"""Constructor for advanced usage: col and row here are 0-indexed CSC data.
 Could allow for shared  `_colptr`, `_rowval`, `_nzval` between multiple
 structs via views or references. Currently unused."""
 function AASparseMatrix(n::Int, m::Int,
@@ -37,33 +35,32 @@ function AASparseMatrix(n::Int, m::Int,
     return AASparseMatrix(m, col, row, data)
 end
 
-# TODO: if issymetric(sparseM) = true, construct symmetric
 function AASparseMatrix(sparseM::SparseMatrixCSC{T, Int64},
                         attributes::att_type = ATT_ORDINARY) where T<:vTypes
+    if issymmetric(sparseM) && attributes == ATT_ORDINARY
+        return AASparseMatrix(tril(sparseM), ATT_SYMMETRIC | ATT_LOWER_TRIANGLE)
+    elseif (istril(sparseM) || istriu(sparseM)) && attributes == ATT_ORDINARY
+        attributes = istril(sparseM) ? ATT_TRI_LOWER : ATT_TRI_UPPER
+    end
+    if attributes in (ATT_TRI_LOWER, ATT_TRI_UPPER) &&
+                    all(diag(sparseM) .== one(eltype(sparseM)))
+        attributes |= ATT_UNIT_TRIANGULAR
+    end
     c = Clong.(sparseM.colptr .+ -1)
     r = Cint.(sparseM.rowval .+ -1)
     vals = copy(sparseM.nzval)
     return AASparseMatrix(size(sparseM)..., c, r, vals, attributes)
 end
 
-# symmetric.
-function AASparseMatrix(sparseS::Symmetric{T, SparseMatrixCSC{T, Int64}}) where T<:vTypes
-    if istriu(sparseS.data)
-        return AASparseMatrix(sparseS.data, ATT_SYMMETRIC | ATT_UPPER_TRIANGLE)
-    elseif istril(sparseS.data)
-        return AASparseMatrix(sparseS.data, ATT_SYMMETRIC | ATT_LOWER_TRIANGLE)
-    end
-    nonRedundant = sparseS.uplo == :U ? triu(sparseS.data) : tril(sparseS.data)
-    triangle = sparseS.uplo == :U ? ATT_UPPER_TRIANGLE : ATT_LOWER_TRIANGLE
-    return AASparseMatrix(nonRedundant, triangle | ATT_SYMMETRIC)
-end
-# could add upper/lower triangular matrix constructors too.
-
 Base.size(M::AASparseMatrix) = (M.matrix.structure.rowCount,
-                                                    M.matrix.structure.columnCount)
+                                    M.matrix.structure.columnCount)
 Base.eltype(M::AASparseMatrix) = eltype(M._nzval)
-LinearAlgebra.issymmetric(M::AASparseMatrix) = M.matrix.structure.attributes &
-                                                     ATT_SYMMETRIC != zero(att_type)
+LinearAlgebra.issymmetric(M::AASparseMatrix) = (M.matrix.structure.attributes &
+                                                ATT_KIND_MASK) == ATT_SYMMETRIC
+LinearAlgebra.istriu(M::AASparseMatrix) = (M.matrix.structure.attributes &
+                            ATT_TRI_LOWER) == ATT_TRI_LOWER
+LinearAlgebra.istril(M::AASparseMatrix) = (M.matrix.structure.attributes &
+                            ATT_TRI_UPPER) == ATT_TRI_UPPER
 
 function Base.getindex(M::AASparseMatrix, i::Int, j::Int)
     @assert all((1, 1) .<= (i,j) .<= size(M))
@@ -123,19 +120,13 @@ factorize(A::AASparseMatrix{T}) where T<:vTypes = AAFactorization(A)
 
 @doc """Factorization object.
 
-Create via `f = AAFactorization(A::SparseMatrixCSC{T, Int64})`. Also accepts 
-a `Symmetric` sparse matrix object.
-
-If `A` is a `Symmetric` matrix object, it'll perform a Cholesky factorization; otherwise,
-it does a QR factorization. Other factorizations are possible via the 2nd argument of `factor!`.
-
-Calls to `solve`, `ldiv`, and their in-place versions require explicitly passing in the
-factorization object as the first argument. On construction, the struct stores a placeholder
-yet-to-be-factored object: the factorization is computed upon the first call to
-`solve`, or by explicitly calling `factor!`.
-
-If the factorization fails, this re-throws the error message from libSparse: if singular,
-you'll get `Error("Matrix is singular")` instead of `LinearAlgebra.SingularException`."""
+Create via `f = AAFactorization(A::SparseMatrixCSC{T, Int64})`. Calls to `solve`,
+`ldiv`, and their in-place versions require explicitly passing in the
+factorization object as the first argument. On construction, the struct stores a
+placeholder yet-to-be-factored object: the factorization is computed upon the first call
+to `solve`, or by explicitly calling `factor!`. If the matrix is symmetric, it defaults to
+a Cholesky factorization; otherwise, it defaults to QR.
+"""
 mutable struct AAFactorization{T<:vTypes} <: LinearAlgebra.Factorization{T}
     matrixObj::AASparseMatrix{T}
     _factorization::SparseOpaqueFactorization{T}
@@ -146,7 +137,8 @@ function AAFactorization(A::AASparseMatrix{T}) where T<:vTypes
     obj = AAFactorization(A, SparseOpaqueFactorization(T))
     function cleanup(aa_fact)
         # If it's yet-to-be-factored, then there's nothing to release
-        if !(aa_fact._factorization.status in (SparseYetToBeFactored, SparseStatusReleased))
+        if !(aa_fact._factorization.status in (SparseYetToBeFactored,
+                                                            SparseStatusReleased))
             SparseCleanup(aa_fact._factorization)
         end
     end
@@ -154,8 +146,8 @@ function AAFactorization(A::AASparseMatrix{T}) where T<:vTypes
 end
 
 # julia's LinearAlgebra module doesn't provide similar constructors.
-AAFactorization(M::SparseMatrixCSC{T, Int64}) where T<:vTypes = AAFactorization(AASparseMatrix(M))
-AAFactorization(S::Symmetric{T, SparseMatrixCSC{T, Int64}}) where T<:vTypes = AAFactorization(AASparseMatrix(S))
+AAFactorization(M::SparseMatrixCSC{T, Int64}) where T<:vTypes =
+                                        AAFactorization(AASparseMatrix(M))
 
 # easiest way to make this follow the defaults and naming conventions of LinearAlgebra?
 # TODO: add tests for the different kinds of factorizations, beyond QR.
@@ -168,6 +160,15 @@ function factor!(aa_fact::AAFactorization{T},
                             SparseFactorizationQR
         end
         aa_fact._factorization = SparseFactor(kind, aa_fact.matrixObj.matrix)
+        if aa_fact._factorization.status == SparseMatrixIsSingular
+            throw(SingularException)
+        elseif aa_fact._factorization.status == SparseStatusFailed
+            throw(ErrorException("Factorization failed: check that the matrix"
+                        * " has the correct properties for the factorization."))
+        elseif aa_fact._factorization.status != SparseStatusOk
+            throw(ErrorException("Something went wrong internally. Error type: "
+                                * String(aa_fact._factorization.status)))
+        end
     end
 end
 
@@ -181,8 +182,8 @@ end
 
 function solve!(aa_fact::AAFactorization{T}, xb::StridedVecOrMat{T}) where T<:vTypes
     @assert (xb isa StridedVector) ||
-            (size(aa_fact.matrixObj)[1] == size(aa_fact.matrixObj)[2]) "Can't in-place solve:" *
-            " x and b are different sizes and Julia cannot resize a matrix."
+            (size(aa_fact.matrixObj)[1] == size(aa_fact.matrixObj)[2]) "Can't in-place " *
+            "solve: x and b are different sizes and Julia cannot resize a matrix."
     factor!(aa_fact)
     SparseSolve(aa_fact._factorization, xb)
     return xb # because KLU.jl also returns

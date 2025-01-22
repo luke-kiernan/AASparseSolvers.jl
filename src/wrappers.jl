@@ -64,6 +64,9 @@ const ATT_TRIANGULAR = att_type(4)
 const ATT_UNIT_TRIANGULAR = att_type(8)
 const ATT_SYMMETRIC = att_type(12)
 const ATT_ALLOCATED_BY_SPARSE = att_type(1) << 15
+const ATT_TRI_LOWER = ATT_TRIANGULAR | ATT_LOWER_TRIANGLE
+const ATT_TRI_UPPER = ATT_TRIANGULAR | ATT_UPPER_TRIANGLE
+const ATT_KIND_MASK = att_type(12)
 
 const vTypes = Union{Cfloat, Cdouble}
 

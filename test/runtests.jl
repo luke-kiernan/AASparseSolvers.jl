@@ -121,6 +121,11 @@ end
             end
             test_fact = AAFactorization(jlA)
             B = rand($T, N, N)
+            if issymmetric(jlA)
+                jlA[1,2] += 0.1
+            end
+            @assert !issymmetric(jlA)
+            @assert !issymmetric(test_fact.matrixObj)
             @test solve(test_fact, B) ≈ Array(jlA) \ B
             b = rand($T, N)
             @test solve(test_fact, b) ≈ Array(jlA) \ b
@@ -177,6 +182,46 @@ end
     end
 end
 
+@testset "all the different errors" begin
+    N = 5
+    err1 = nothing
+    singular = spzeros(Float64, N, N)
+    singular[1, 2] = 1.0
+    try
+        f = AAFactorization(singular)
+        factor!(f)
+    catch err1
+        if(sprint(showerror, err1) !== "Matrix is structurally singular\n")
+            display(singular)
+        end
+    end
+    @test sprint(showerror, err1) == "Matrix is structurally singular\n"
+    
+    err2 = nothing
+    temp = sprand(N, N, 0.5)
+    nonPosDef = sparse(temp*temp' + diagm(rand(N)) +
+                    diagm(vcat(zeros(Float64, N-1), [-1*float(N+1)])))
+    try
+        f = AAFactorization(nonPosDef)
+        factor!(f, AASparseSolvers.SparseFactorizationCholesky)
+    catch err2
+    end
+    @test err2 !== nothing
+
+    err3 = nothing
+    nonSymmetric = sparse(temp*temp' + diagm(rand(N)) + singular)
+    try
+        f = AAFactorization(nonSymmetric)
+        @assert size(f.matrixObj)[1] == size(f.matrixObj)[2]
+        factor!(f, AASparseSolvers.SparseFactorizationCholesky)
+    catch err3
+    end
+    # they say "non-square:" I think they really mean "non-symmetric."
+    @test sprint(showerror, err3) == "Cannot perform symmetric" *
+            " matrix factorization of non-square matrix.\n"
+
+end
+
 @testset "ccall sparsefactor" begin
     for T in (Float32, Float64)
         @eval begin
@@ -229,8 +274,9 @@ end
     bx, BX = zeros(4), zeros(4,4)
     bx[1:3], BX[1:3, :] = b, B
     # Seems like julia and apple make different choices
-    # when there's multiple solutions.
-    # @test isapprox(bx, shortMatrix\b)
+    # when there's multiple solutions. which is odd because I thought
+    # they both did the minimal norm solution...
+    # @test isapprox(solve!(aa_fact2, copy(bx)), shortMatrix\b)
     @test isapprox(shortMatrix * solve!(aa_fact2, bx), b)
     
     # solve!(aa_fact2, BX)
@@ -242,8 +288,7 @@ end
     N = 4
     temp = sprand(N, N, 0.3)
     A = sparse(temp*temp' + diagm(rand(N)))
-    A2 = tril(A)
-    sym_fact = AAFactorization(Symmetric(A2, :L))
+    sym_fact = AAFactorization(A)
     @test issymmetric(sym_fact.matrixObj)
     factor!(sym_fact)
     x, X = rand(N), rand(N, 4)
