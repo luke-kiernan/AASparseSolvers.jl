@@ -1,4 +1,4 @@
-using SparseArrays
+using SparseArrays: SparseMatrixCSC
 
 # unused. But if I can find a library that supports C-style structs
 # of packed bitflags with enum fields, then I'll want them.
@@ -12,7 +12,7 @@ end
     SparseOrdinary = 0
     SparseTriangular = 1
     SparseUnitTriangular = 2
-    SparseSymmetric = 4
+    SparseSymmetric = 3
 end=#
 
 @enum SparseFactorization_t::UInt8 begin
@@ -157,7 +157,8 @@ SparseOpaqueSymbolicFactorization() = SparseOpaqueSymbolicFactorization(
     0, 0, 0, 0
 )
 
-# TODO: I have T here to match the C: _Double, _Float variants. But T isn't used!!
+# T isn't used in struct body, but I need it for type dispatch.
+# The header has _Double, _Float variants (with identical bodies).
 struct SparseOpaqueFactorization{T<:vTypes}
     status::SparseStatus_t
     attributes::att_type
@@ -315,7 +316,7 @@ for T in (Cfloat, Cdouble)
             LIBSPARSE.$ofTransposeMangled(arg1::SparseOpaqueFactorization{$T})::SparseOpaqueFactorization{$T}
     )
 
-    # TODO: these SparseConvertFromCoord functions are untested.
+    # TODO: these SparseConvertFromCoord functions are unused and untested.
     local convertCoordMangled = T == Cfloat ? :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKf :
                                             :_Z27SparseConvertFromCoordinateiilh18SparseAttributes_tPKiS1_PKd
     @eval begin

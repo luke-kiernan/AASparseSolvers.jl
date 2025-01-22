@@ -105,6 +105,10 @@ end
             @test aaM[i,j] == sparseM[i,j]
         end
     end
+    denseM = Array(sparseM)
+    for i in 1:(N*M)
+        @test denseM[i] == aaM[i]
+    end
 end
 
 @testset "AAFactorization solve" begin
@@ -206,6 +210,9 @@ end
 
 @testset "non-square in-place solve" begin
     tallMatrix = sprand(6,3,0.5)
+    while any( all(col .== 0.0) for col in eachcol(tallMatrix))
+        tallMatrix = sprand(6,3,0.5)
+    end
     aa_fact = AAFactorization(tallMatrix)
     x, X = rand(3), rand(3, 3)
     b, B = tallMatrix * x, tallMatrix * X
@@ -213,6 +220,9 @@ end
     # solve!(aa_fact, B)
     # @test isapprox(B, X; 0.001)
     shortMatrix = sprand(3,4,0.9)
+    while any( all(row .== 0.0) for row in eachrow(shortMatrix))
+        shortMatrix = sprand(3,4,0.9)
+    end
     aa_fact2 = AAFactorization(shortMatrix)
     x, X = rand(4), rand(4,4)
     b, B = shortMatrix * x, shortMatrix * X
@@ -227,14 +237,15 @@ end
     # @test BX ≈ X
 end
 
-@testset "symmetric LDLT" begin
+@testset "symmetric Cholesky" begin
     # create a random symmetric positive-definite matrix A.
     N = 4
     temp = sprand(N, N, 0.3)
     A = sparse(temp*temp' + diagm(rand(N)))
     A2 = tril(A)
-    sym_fact = AAFactorization(A2, true, false)
-    @test (sym_fact.aa_matrix.structure.attributes | AASparseSolvers.ATT_SYMMETRIC) != 0
+    sym_fact = AAFactorization(Symmetric(A2, :L))
+    @test issymmetric(sym_fact.matrixObj)
+    factor!(sym_fact)
     x, X = rand(N), rand(N, 4)
     b, B = A*x, A*X
     @test solve(sym_fact, b) ≈ x
