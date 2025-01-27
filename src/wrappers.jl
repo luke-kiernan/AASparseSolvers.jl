@@ -37,7 +37,7 @@ end
 @enum SparseScaling_t::UInt8 begin
     SpraseScalingDefault = 0
     SparseScalingUser = 1
-    SparseScalingQuilibriationInf = 2
+    SparseScalingEquilibriationInf = 2
 end
 
 @enum SparseStatus_t::Int32 begin
@@ -67,6 +67,7 @@ const ATT_ALLOCATED_BY_SPARSE = att_type(1) << 15
 const ATT_TRI_LOWER = ATT_TRIANGULAR | ATT_LOWER_TRIANGLE
 const ATT_TRI_UPPER = ATT_TRIANGULAR | ATT_UPPER_TRIANGLE
 const ATT_KIND_MASK = att_type(12)
+const ATT_TRIANGLE_MASK = att_type(4)
 
 const vTypes = Union{Cfloat, Cdouble}
 

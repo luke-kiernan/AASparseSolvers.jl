@@ -57,10 +57,12 @@ Base.size(M::AASparseMatrix) = (M.matrix.structure.rowCount,
 Base.eltype(M::AASparseMatrix) = eltype(M._nzval)
 LinearAlgebra.issymmetric(M::AASparseMatrix) = (M.matrix.structure.attributes &
                                                 ATT_KIND_MASK) == ATT_SYMMETRIC
-LinearAlgebra.istriu(M::AASparseMatrix) = (M.matrix.structure.attributes &
-                            ATT_TRI_LOWER) == ATT_TRI_LOWER
-LinearAlgebra.istril(M::AASparseMatrix) = (M.matrix.structure.attributes &
-                            ATT_TRI_UPPER) == ATT_TRI_UPPER
+istri(M::AASparseMatrix) = (M.matrix.structure.attributes
+                                                & ATT_KIND_MASK) == ATT_TRIANGULAR
+LinearAlgebra.istriu(M::AASparseMatrix) = istri(M) && (MM.matrix.structure.attributes
+                                                & ATT_TRIANGLE_MASK == ATT_LOWER_TRIANGLE)
+LinearAlgebra.istril(M::AASparseMatrix) = istri(M) && (MM.matrix.structure.attributes
+                                                & ATT_TRIANGLE_MASK == ATT_UPPER_TRIANGLE)
 
 function Base.getindex(M::AASparseMatrix, i::Int, j::Int)
     @assert all((1, 1) .<= (i,j) .<= size(M))
